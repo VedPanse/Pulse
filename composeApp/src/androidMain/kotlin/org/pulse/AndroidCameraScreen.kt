@@ -2,6 +2,7 @@ package org.pulse
 
 import android.Manifest
 import android.content.Context
+import android.content.Context.MODE_PRIVATE
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,18 +17,24 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetState
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,6 +43,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,13 +55,87 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.pulse.signal.ClusterSnapshot
 import org.pulse.signal.SignalEngine
 
 private const val WIFI_SCAN_ENABLED = true
+private const val PREFS_NAME = "pulse_prefs"
+private const val PREFS_HAS_SEEN_INTRO = "has_seen_intro"
 
 @Composable
-fun AndroidCameraScreen() {
+fun AndroidRootScreen() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    var hasSeenIntro by remember { mutableStateOf(prefs.getBoolean(PREFS_HAS_SEEN_INTRO, false)) }
+    if (hasSeenIntro) {
+        AndroidCameraScreen()
+    } else {
+        IntroScreen(
+            onStart = {
+                prefs.edit().putBoolean(PREFS_HAS_SEEN_INTRO, true).apply()
+                hasSeenIntro = true
+            },
+        )
+    }
+}
+
+@Composable
+private fun IntroScreen(onStart: () -> Unit) {
+    val transition = rememberInfiniteTransition(label = "introPulse")
+    val pulse by transition.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "introPulseScale",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0C0E)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Canvas(modifier = Modifier.size(120.dp)) {
+                val radius = size.minDimension / 3f * pulse
+                drawCircle(
+                    color = Color(0xFFEF4444),
+                    radius = radius,
+                    center = center,
+                    alpha = 0.7f,
+                )
+                drawCircle(
+                    color = Color(0xFFEF4444),
+                    radius = radius * 1.6f,
+                    center = center,
+                    alpha = 0.3f,
+                    style = Stroke(width = 3f),
+                )
+            }
+            Text(
+                text = "Passive signal sensing. No identities.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFDDDDDD),
+                modifier = Modifier.padding(top = 20.dp, bottom = 12.dp),
+            )
+            TextButton(
+                onClick = onStart,
+                modifier = Modifier
+                    .height(44.dp)
+                    .padding(horizontal = 24.dp)
+                    .background(Color.White, RoundedCornerShape(22.dp)),
+            ) {
+                Text("Start scanning", color = Color.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AndroidCameraScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val engineState = remember { mutableStateOf(SignalEngine()) }
@@ -61,6 +143,9 @@ fun AndroidCameraScreen() {
     val ingestor = remember { AndroidSignalIngestor(context, engine, WIFI_SCAN_ENABLED) }
     val clustersState = remember { mutableStateOf(emptyList<ClusterSnapshot>()) }
     var permissionsGranted by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -93,7 +178,24 @@ fun AndroidCameraScreen() {
     Box(modifier = Modifier.fillMaxSize()) {
         CameraPreview(permissionsGranted)
         ClusterDots(clustersState)
-        ClusterOverlay(clustersState)
+        InfoButton(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp),
+            onClick = { showInfo = true },
+        )
+    }
+
+    if (showInfo) {
+        InfoSheet(
+            clusters = clustersState.value,
+            sheetState = sheetState,
+            onDismiss = {
+                scope.launch { sheetState.hide() }.invokeOnCompletion {
+                    showInfo = false
+                }
+            },
+        )
     }
 }
 
@@ -105,9 +207,7 @@ private fun CameraPreview(permissionsGranted: Boolean) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center
-        ) {
-            Text("Camera & Bluetooth permissions required", color = Color.White)
-        }
+        ) {}
         return
     }
     AndroidView(
@@ -135,28 +235,6 @@ private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.Life
         },
         ContextCompat.getMainExecutor(context),
     )
-}
-
-@Composable
-private fun ClusterOverlay(clustersState: MutableState<List<ClusterSnapshot>>) {
-    val clusters = clustersState.value
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Bottom,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0x88000000)),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(clusters) { cluster ->
-                ClusterCard(cluster)
-            }
-        }
-    }
 }
 
 @Composable
@@ -201,37 +279,68 @@ private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>) {
 }
 
 @Composable
-private fun ClusterCard(cluster: ClusterSnapshot) {
-    val trendLabel = when (cluster.trend) {
-        org.pulse.signal.Trend.Strengthening -> "Strengthening"
-        org.pulse.signal.Trend.Stable -> "Stable"
-        org.pulse.signal.Trend.Weakening -> "Weakening"
-    }
-    val stability = when {
-        cluster.stabilityScore >= 0.7f -> "Stationary"
-        cluster.stabilityScore <= 0.3f -> "Moving"
-        else -> "Mixed"
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xCC101010)),
+private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .background(Color(0x66FFFFFF), CircleShape)
+            .border(1.dp, Color(0x88FFFFFF), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Canvas(modifier = Modifier.size(18.dp)) {
+            drawCircle(color = Color.White, radius = 2.2f, center = center.copy(y = center.y - 5))
+            drawLine(
+                color = Color.White,
+                start = center.copy(y = center.y - 1),
+                end = center.copy(y = center.y + 6),
+                strokeWidth = 3f,
+            )
+        }
+    }
+}
+
+@Composable
+private fun InfoSheet(
+    clusters: List<ClusterSnapshot>,
+    sheetState: ModalBottomSheetState,
+    onDismiss: () -> Unit,
+) {
+    val totalDevices = clusters.sumOf { it.estimatedDeviceCount }
+    val confidence = when {
+        clusters.isEmpty() -> "Low"
+        clusters.any { it.confidence == org.pulse.signal.ConfidenceLevel.High } -> "High"
+        clusters.any { it.confidence == org.pulse.signal.ConfidenceLevel.Medium } -> "Medium"
+        else -> "Low"
+    }
+    val stationaryCount = clusters.count { it.stabilityScore >= 0.7f }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF121212),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Text(
-                text = "Cluster ${cluster.clusterId}",
+                text = "We found $totalDevices devices around you.",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White,
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Confidence: $confidence", color = Color(0xFFE0E0E0))
+                Text("Stationary: $stationaryCount", color = Color(0xFFE0E0E0))
+            }
             Text(
-                text = "Confidence: ${cluster.confidence} • Trend: $trendLabel",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFFE0E0E0),
+                text = "Passive Bluetooth signals only. No identities stored.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFAAAAAA),
             )
-            Text(
-                text = "Devices: ${cluster.estimatedDeviceCount} • Stability: $stability",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFFE0E0E0),
-            )
+            Box(modifier = Modifier.height(12.dp))
         }
     }
 }

@@ -4,24 +4,42 @@ import AVFoundation
 struct PulseCameraView: View {
     @StateObject private var viewModel = PulseViewModel()
     @State private var cameraAuthorized = false
+    @AppStorage("has_seen_intro") private var hasSeenIntro = false
+    @State private var showInfo = false
 
     var body: some View {
-        ZStack {
-            if cameraAuthorized {
-                CameraPreview(position: .back)
+        Group {
+            if hasSeenIntro {
+                ZStack {
+                    if cameraAuthorized {
+                        CameraPreview(position: .back)
+                    } else {
+                        Color.black
+                    }
+                    ClusterDots(clusters: viewModel.clusters)
+                    VStack {
+                        HStack {
+                            Spacer()
+                            InfoButton {
+                                showInfo = true
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(16)
+                }
+                .onAppear {
+                    requestCameraAccess()
+                }
+                .sheet(isPresented: $showInfo) {
+                    InfoSheet(clusters: viewModel.clusters)
+                }
             } else {
-                Color.black
-                Text("Camera access required")
-                    .foregroundColor(.white)
+                IntroView {
+                    hasSeenIntro = true
+                    requestCameraAccess()
+                }
             }
-            ClusterDots(clusters: viewModel.clusters)
-            VStack {
-                Spacer()
-                ClusterOverlay(clusters: viewModel.clusters)
-            }
-        }
-        .onAppear {
-            requestCameraAccess()
         }
     }
 
@@ -38,23 +56,6 @@ struct PulseCameraView: View {
         default:
             cameraAuthorized = false
         }
-    }
-}
-
-struct ClusterOverlay: View {
-    let clusters: [ClusterViewData]
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(clusters) { cluster in
-                    ClusterCardView(cluster: cluster)
-                }
-            }
-            .padding(12)
-        }
-        .frame(maxWidth: .infinity)
-        .background(Color.black.opacity(0.5))
     }
 }
 
@@ -106,26 +107,106 @@ struct PulsingDot: View {
     }
 }
 
-struct ClusterCardView: View {
-    let cluster: ClusterViewData
+struct IntroView: View {
+    let onStart: () -> Void
+    @State private var pulse = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Cluster \(cluster.id)")
-                .font(.headline)
-                .foregroundColor(.white)
-            Text("Confidence: \(cluster.confidence) • Trend: \(cluster.trend)")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.9))
-            Text("Devices: \(cluster.deviceCount) • Stability: \(cluster.stability)")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.9))
+        ZStack {
+            LinearGradient(
+                colors: [Color.black, Color(red: 0.08, green: 0.08, blue: 0.1)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.7))
+                        .frame(width: pulse ? 70 : 50, height: pulse ? 70 : 50)
+                    Circle()
+                        .stroke(Color.red.opacity(0.35), lineWidth: 3)
+                        .frame(width: pulse ? 110 : 80, height: pulse ? 110 : 80)
+                }
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+                        pulse.toggle()
+                    }
+                }
+                Text("Passive signal sensing. No identities.")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.85))
+                Button(action: onStart) {
+                    Text("Start scanning")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 28)
+                        .background(Color.white)
+                        .clipShape(Capsule())
+                }
+            }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.7))
-        .cornerRadius(12)
+        .ignoresSafeArea()
     }
+}
+
+struct InfoButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "info")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 36, height: 36)
+                .background(BlurView(style: .systemUltraThinMaterialDark))
+                .clipShape(Circle())
+                .overlay(
+                    Circle().stroke(Color.white.opacity(0.4), lineWidth: 1)
+                )
+        }
+    }
+}
+
+struct InfoSheet: View {
+    let clusters: [ClusterViewData]
+
+    var body: some View {
+        let totalDevices = clusters.reduce(0) { $0 + $1.deviceCount }
+        let confidence: String = {
+            if clusters.contains(where: { $0.confidence.contains("High") }) { return "High" }
+            if clusters.contains(where: { $0.confidence.contains("Medium") }) { return "Medium" }
+            return "Low"
+        }()
+        let stationaryCount = clusters.filter { $0.stability == "Stationary" }.count
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("We found \(totalDevices) devices around you.")
+                .font(.title3.weight(.semibold))
+            HStack(spacing: 12) {
+                Text("Confidence: \(confidence)")
+                Text("Stationary: \(stationaryCount)")
+            }
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            Text("Passive Bluetooth signals only. No identities stored.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(20)
+        .presentationDetents([.medium])
+    }
+}
+
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
 }
 
 struct CameraPreview: UIViewRepresentable {
