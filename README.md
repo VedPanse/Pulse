@@ -102,7 +102,7 @@ The app installs and launches directly on the phone.
 
 No data is stored or transmitted.
 
-![Screenshot](assets/ss.png)
+![Screenshot](assets/ss.jpg)
 
 ---
 
