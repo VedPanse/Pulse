@@ -1,9 +1,15 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package org.pulse
 
 import android.Manifest
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
 import android.os.Build
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -30,9 +36,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
@@ -62,6 +68,7 @@ import org.pulse.signal.SignalEngine
 private const val WIFI_SCAN_ENABLED = true
 private const val PREFS_NAME = "pulse_prefs"
 private const val PREFS_HAS_SEEN_INTRO = "has_seen_intro"
+private const val CLUSTER_GRACE_MILLIS = 3_000L
 
 @Composable
 fun AndroidRootScreen() {
@@ -175,13 +182,15 @@ private fun AndroidCameraScreen() {
         }
     }
 
+    val motion = rememberDeviceMotionState()
     Box(modifier = Modifier.fillMaxSize()) {
         CameraPreview(permissionsGranted)
-        ClusterDots(clustersState)
+        ClusterDots(clustersState, motion)
+        DebugMotionOverlay(motion)
         InfoButton(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(16.dp),
+                .padding(top = 32.dp, end = 16.dp),
             onClick = { showInfo = true },
         )
     }
@@ -238,7 +247,7 @@ private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.Life
 }
 
 @Composable
-private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>) {
+private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>, motionState: MotionOffset) {
     val clusters = clustersState.value
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
@@ -250,16 +259,19 @@ private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>) {
         ),
         label = "pulseScale",
     )
+    val layoutState = remember { ClusterLayoutState() }
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val now = System.currentTimeMillis()
+        val positions = layoutState.positionsFor(clusters, now)
         val padding = 40f
         val width = size.width - padding * 2
         val height = size.height - padding * 2
+        val xShift = (width * 0.35f) * motionState.x
+        val yShift = (height * 0.25f) * motionState.y
         clusters.forEach { cluster ->
-            val seed = cluster.clusterId.fold(0) { acc, char -> acc * 31 + char.code }
-            val xSeed = ((seed and 0xFFFF) % 1000) / 1000f
-            val ySeed = (((seed shr 16) and 0xFFFF) % 1000) / 1000f
-            val cx = padding + width * xSeed
-            val cy = padding + height * ySeed
+            val relative = positions[cluster.clusterId] ?: OffsetSeed(0.5f, 0.5f)
+            val cx = padding + width * relative.x + xShift
+            val cy = padding + height * relative.y + yShift
             val radius = 8f * pulse
             drawCircle(
                 color = Color(0xFFEF4444),
@@ -275,6 +287,25 @@ private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>) {
                 style = Stroke(width = 2f),
             )
         }
+    }
+}
+
+@Composable
+private fun DebugMotionOverlay(motionState: MotionOffset) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        contentAlignment = Alignment.TopStart,
+    ) {
+        Text(
+            text = "tiltX=${"%.2f".format(motionState.x)} tiltY=${"%.2f".format(motionState.y)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier
+                .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -300,10 +331,11 @@ private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InfoSheet(
     clusters: List<ClusterSnapshot>,
-    sheetState: ModalBottomSheetState,
+    sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
 ) {
     val totalDevices = clusters.sumOf { it.estimatedDeviceCount }
@@ -343,6 +375,83 @@ private fun InfoSheet(
             Box(modifier = Modifier.height(12.dp))
         }
     }
+}
+
+private data class OffsetSeed(val x: Float, val y: Float)
+
+private class ClusterLayoutState {
+    private val slotSeeds = listOf(
+        OffsetSeed(0.2f, 0.25f),
+        OffsetSeed(0.5f, 0.25f),
+        OffsetSeed(0.8f, 0.25f),
+        OffsetSeed(0.2f, 0.5f),
+        OffsetSeed(0.5f, 0.5f),
+        OffsetSeed(0.8f, 0.5f),
+        OffsetSeed(0.2f, 0.75f),
+        OffsetSeed(0.5f, 0.75f),
+        OffsetSeed(0.8f, 0.75f),
+    )
+    private val assignments = mutableMapOf<String, Int>()
+    private val lastSeen = mutableMapOf<String, Long>()
+
+    fun positionsFor(clusters: List<ClusterSnapshot>, nowMillis: Long): Map<String, OffsetSeed> {
+        val ordered = clusters.sortedByDescending { it.aggregatedPresenceScore }
+        val used = mutableSetOf<Int>()
+        for (cluster in ordered) {
+            val existing = assignments[cluster.clusterId]
+            val slot = when {
+                existing != null && existing in slotSeeds.indices && existing !in used -> existing
+                else -> nextFreeSlot(used)
+            }
+            assignments[cluster.clusterId] = slot
+            used += slot
+            lastSeen[cluster.clusterId] = nowMillis
+        }
+        val iterator = assignments.keys.iterator()
+        while (iterator.hasNext()) {
+            val id = iterator.next()
+            val seen = lastSeen[id] ?: 0L
+            if (ordered.none { it.clusterId == id } && nowMillis - seen > CLUSTER_GRACE_MILLIS) {
+                iterator.remove()
+                lastSeen.remove(id)
+            }
+        }
+        return assignments.mapValues { slotSeeds[it.value % slotSeeds.size] }
+    }
+
+    private fun nextFreeSlot(used: Set<Int>): Int {
+        for (index in slotSeeds.indices) {
+            if (index !in used) return index
+        }
+        return used.size % slotSeeds.size
+    }
+}
+
+private data class MotionOffset(val x: Float, val y: Float)
+
+@Composable
+private fun rememberDeviceMotionState(): MotionOffset {
+    val context = LocalContext.current
+    val motionState = remember { mutableStateOf(MotionOffset(0f, 0f)) }
+    DisposableEffect(Unit) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (sensor == null) return@DisposableEffect onDispose {}
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                motionState.value = MotionOffset(
+                    x = (event.values[0] / SensorManager.GRAVITY_EARTH).coerceIn(-1f, 1f),
+                    y = (event.values[1] / SensorManager.GRAVITY_EARTH).coerceIn(-1f, 1f),
+                )
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { sensorManager.unregisterListener(listener) }
+    }
+    return motionState.value
 }
 
 private fun requiredPermissions(enableWifiScan: Boolean): List<String> {

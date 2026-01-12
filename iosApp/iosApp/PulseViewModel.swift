@@ -11,6 +11,7 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
         decayHalfLifeMillis: 18_000,
         minSamplesForPresence: 3
     )
+    private let engineQueue = DispatchQueue(label: "pulse.engine")
     private var central: CBCentralManager?
     private var timer: Timer?
     private let idGenerator = IosEphemeralId()
@@ -38,12 +39,14 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
     ) {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let sourceId = idGenerator.idFor(prefix: "ble", rawId: peripheral.identifier.uuidString, nowMillis: now)
-        engine.addSample(
-            sourceId: sourceId,
-            rssi: Int32(RSSI.intValue),
-            timestampMillis: now,
-            sourceType: SourceType.ble
-        )
+        engineQueue.async { [engine] in
+            engine.addSample(
+                sourceId: sourceId,
+                rssi: Int32(RSSI.intValue),
+                timestampMillis: now,
+                sourceType: SourceType.ble
+            )
+        }
     }
 
     private func startTimer() {
@@ -54,9 +57,14 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
 
     private func refresh() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        engine.tick(nowMillis: now)
-        let snapshot = engine.getClustersSnapshotArray(nowMillis: now)
-        clusters = ClusterViewData.from(snapshot: snapshot)
+        engineQueue.async { [engine] in
+            engine.tick(nowMillis: now)
+            let snapshot = engine.getClustersSnapshotArray(nowMillis: now)
+            let viewData = ClusterViewData.from(snapshot: snapshot)
+            DispatchQueue.main.async {
+                self.clusters = viewData
+            }
+        }
     }
 
     deinit {

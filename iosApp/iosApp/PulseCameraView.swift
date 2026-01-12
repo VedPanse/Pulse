@@ -1,11 +1,14 @@
 import SwiftUI
 import AVFoundation
+import CoreMotion
 
 struct PulseCameraView: View {
     @StateObject private var viewModel = PulseViewModel()
     @State private var cameraAuthorized = false
     @AppStorage("has_seen_intro") private var hasSeenIntro = false
     @State private var showInfo = false
+    @StateObject private var layoutState = ClusterLayoutState()
+    @StateObject private var motionState = MotionState()
 
     var body: some View {
         Group {
@@ -16,7 +19,8 @@ struct PulseCameraView: View {
                     } else {
                         Color.black
                     }
-                    ClusterDots(clusters: viewModel.clusters)
+                    ClusterDots(clusters: viewModel.clusters, layoutState: layoutState, motionState: motionState)
+                    DebugMotionOverlay(motionState: motionState)
                     VStack {
                         HStack {
                             Spacer()
@@ -26,7 +30,8 @@ struct PulseCameraView: View {
                         }
                         Spacer()
                     }
-                    .padding(16)
+                    .padding(.top, 32)
+                    .padding(.trailing, 16)
                 }
                 .onAppear {
                     requestCameraAccess()
@@ -61,24 +66,33 @@ struct PulseCameraView: View {
 
 struct ClusterDots: View {
     let clusters: [ClusterViewData]
+    let layoutState: ClusterLayoutState
+    @ObservedObject var motionState: MotionState
 
     var body: some View {
         GeometryReader { proxy in
+            let positions = layoutState.positions(for: clusters)
+            let xShift = proxy.size.width * 0.35 * motionState.x
+            let yShift = proxy.size.height * 0.25 * (-motionState.y)
             ForEach(clusters) { cluster in
                 PulsingDot()
-                    .position(dotPosition(for: cluster.id, in: proxy.size))
+                    .position(dotPosition(for: cluster.id, in: proxy.size, positions: positions, xShift: xShift, yShift: yShift))
             }
         }
         .allowsHitTesting(false)
     }
 
-    private func dotPosition(for clusterId: String, in size: CGSize) -> CGPoint {
-        let hash = clusterId.unicodeScalars.reduce(0) { $0 * 31 + Int($1.value) }
-        let xSeed = CGFloat((hash & 0xFFFF) % 1000) / 1000.0
-        let ySeed = CGFloat(((hash >> 16) & 0xFFFF) % 1000) / 1000.0
+    private func dotPosition(
+        for clusterId: String,
+        in size: CGSize,
+        positions: [String: CGPoint],
+        xShift: CGFloat,
+        yShift: CGFloat
+    ) -> CGPoint {
         let padding: CGFloat = 40
-        let x = padding + (size.width - padding * 2) * xSeed
-        let y = padding + (size.height - padding * 2) * ySeed
+        let seed = positions[clusterId] ?? CGPoint(x: 0.5, y: 0.5)
+        let x = padding + (size.width - padding * 2) * seed.x + xShift
+        let y = padding + (size.height - padding * 2) * seed.y + yShift
         return CGPoint(x: x, y: y)
     }
 }
@@ -207,6 +221,106 @@ struct BlurView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+}
+
+final class ClusterLayoutState: ObservableObject {
+    private let slots: [CGPoint] = [
+        CGPoint(x: 0.2, y: 0.25),
+        CGPoint(x: 0.5, y: 0.25),
+        CGPoint(x: 0.8, y: 0.25),
+        CGPoint(x: 0.2, y: 0.5),
+        CGPoint(x: 0.5, y: 0.5),
+        CGPoint(x: 0.8, y: 0.5),
+        CGPoint(x: 0.2, y: 0.75),
+        CGPoint(x: 0.5, y: 0.75),
+        CGPoint(x: 0.8, y: 0.75),
+    ]
+    private var assignments: [String: Int] = [:]
+    private var lastSeen: [String: TimeInterval] = [:]
+    private let grace: TimeInterval = 3.0
+
+    func positions(for clusters: [ClusterViewData]) -> [String: CGPoint] {
+        let now = Date().timeIntervalSince1970
+        let ordered = clusters.sorted { $0.score > $1.score }
+        var used = Set<Int>()
+        for cluster in ordered {
+            let existing = assignments[cluster.id]
+            let slot: Int
+            if let existing, !used.contains(existing) {
+                slot = existing
+            } else {
+                slot = nextFreeSlot(used: used)
+            }
+            assignments[cluster.id] = slot
+            used.insert(slot)
+            lastSeen[cluster.id] = now
+        }
+        assignments.keys.forEach { key in
+            if ordered.contains(where: { $0.id == key }) { return }
+            let seen = lastSeen[key] ?? 0
+            if now - seen > grace {
+                assignments.removeValue(forKey: key)
+                lastSeen.removeValue(forKey: key)
+            }
+        }
+        var result: [String: CGPoint] = [:]
+        for (id, slot) in assignments {
+            result[id] = slots[slot % slots.count]
+        }
+        return result
+    }
+
+    private func nextFreeSlot(used: Set<Int>) -> Int {
+        for index in slots.indices where !used.contains(index) {
+            return index
+        }
+        return used.count % slots.count
+    }
+}
+
+final class MotionState: ObservableObject {
+    @Published var x: CGFloat = 0
+    @Published var y: CGFloat = 0
+
+    private let manager = CMMotionManager()
+
+    init() {
+        manager.deviceMotionUpdateInterval = 0.1
+        if manager.isDeviceMotionAvailable {
+            manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+                guard let motion else { return }
+                let gx = motion.gravity.x
+                let gy = motion.gravity.y
+                self?.x = CGFloat(max(-1.0, min(1.0, gx)))
+                self?.y = CGFloat(max(-1.0, min(1.0, gy)))
+            }
+        }
+    }
+
+    deinit {
+        manager.stopDeviceMotionUpdates()
+    }
+}
+
+struct DebugMotionOverlay: View {
+    @ObservedObject var motionState: MotionState
+
+    var body: some View {
+        VStack {
+            HStack {
+                Text(String(format: "yaw: %.2f  pitch: %.2f", motionState.x, motionState.y))
+                    .font(.caption)
+                    .padding(6)
+                    .background(Color.black.opacity(0.6))
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(12)
+        .allowsHitTesting(false)
+    }
 }
 
 struct CameraPreview: UIViewRepresentable {
