@@ -228,7 +228,8 @@ private fun cameraPreview(permissionsGranted: Boolean) {
                     .fillMaxSize()
                     .background(Color.Black),
             contentAlignment = Alignment.Center,
-        )
+        ) {
+        }
         return
     }
     AndroidView(
