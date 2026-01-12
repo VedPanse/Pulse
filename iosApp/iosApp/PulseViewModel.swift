@@ -1,20 +1,21 @@
 import Foundation
 import CoreBluetooth
-import CryptoKit
 import ComposeApp
 
-final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate {
-    @Published var clusters: [ClusterViewData] = []
+private func kotlinInt(_ value: Int32?) -> KotlinInt? {
+    guard let value = value else { return nil }
+    return KotlinInt(int: value)
+}
 
-    private let engine = SignalEngine(
-        windowMillis: 20_000,
-        decayHalfLifeMillis: 18_000,
-        minSamplesForPresence: 3
-    )
-    private let engineQueue = DispatchQueue(label: "pulse.engine")
+final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate {
+    @Published var dots: [UiDot] = []
+    @Published var summary: TrackerSummary?
+    @Published var debug: DebugSnapshot?
+
+    private let tracker = DeviceTracker()
+    private let trackerQueue = DispatchQueue(label: "pulse.tracker")
     private var central: CBCentralManager?
     private var timer: Timer?
-    private let idGenerator = IosEphemeralId()
 
     override init() {
         super.init()
@@ -38,101 +39,63 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
         rssi RSSI: NSNumber
     ) {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let sourceId = idGenerator.idFor(prefix: "ble", rawId: peripheral.identifier.uuidString, nowMillis: now)
-        engineQueue.async { [engine] in
-            engine.addSample(
-                sourceId: sourceId,
-                rssi: Int32(RSSI.intValue),
-                timestampMillis: now,
-                sourceType: SourceType.ble
-            )
+        let deviceKey = peripheral.identifier.uuidString
+        let manufacturerData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        let manufacturerId: Int32?
+        if let data = manufacturerData, data.count >= 2 {
+            manufacturerId = Int32(Int(data[0]) | (Int(data[1]) << 8))
+        } else {
+            manufacturerId = nil
+        }
+        let serviceUuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map {
+            $0.uuidString
+        } ?? []
+        let txPowerValue = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
+        let txPower = txPowerValue == nil ? nil : Int32(txPowerValue ?? 0)
+        let event = BleScanEvent(
+            platform: "ios",
+            timestampMs: now,
+            rssi: Int32(RSSI.intValue),
+            txPower: kotlinInt(txPower),
+            manufacturerId: kotlinInt(manufacturerId),
+            serviceUuids: serviceUuids,
+            rawAdvHash: nil,
+            deviceKey: deviceKey
+        )
+        trackerQueue.async { [tracker] in
+            tracker.onScan(event: event)
         }
     }
 
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.refresh()
         }
     }
 
     private func refresh() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        engineQueue.async { [engine] in
-            engine.tick(nowMillis: now)
-            let snapshot = engine.getClustersSnapshotArray(nowMillis: now)
-            let viewData = ClusterViewData.from(snapshot: snapshot)
+        trackerQueue.async { [tracker] in
+            tracker.tick(nowMs: now)
+            let dots = tracker.getDotsSnapshot()
+            let summary = tracker.getSummarySnapshot()
+            let debug = tracker.getDebugSnapshot(nowMs: now)
             DispatchQueue.main.async {
-                self.clusters = viewData
+                self.dots = dots
+                self.summary = summary
+                self.debug = debug
             }
+        }
+    }
+
+    func updateViewport(width: Float, height: Float) {
+        trackerQueue.async { [tracker] in
+            tracker.setViewport(widthPx: width, heightPx: height)
         }
     }
 
     deinit {
         timer?.invalidate()
         central?.stopScan()
-    }
-}
-
-struct ClusterViewData: Identifiable {
-    let id: String
-    let confidence: String
-    let trend: String
-    let deviceCount: Int
-    let stability: String
-    let score: Float
-
-    static func from(snapshot: KotlinArray<ClusterSnapshot>) -> [ClusterViewData] {
-        var results: [ClusterViewData] = []
-        let size = Int(snapshot.size)
-        for index in 0..<size {
-            guard let item = snapshot.get(index: Int32(index)) else { continue }
-            let stability: String
-            if item.stabilityScore >= 0.7 {
-                stability = "Stationary"
-            } else if item.stabilityScore <= 0.3 {
-                stability = "Moving"
-            } else {
-                stability = "Mixed"
-            }
-            let trend: String
-            switch item.trend {
-            case .strengthening:
-                trend = "Strengthening"
-            case .weakening:
-                trend = "Weakening"
-            default:
-                trend = "Stable"
-            }
-            results.append(
-                ClusterViewData(
-                    id: item.clusterId,
-                    confidence: "\(item.confidence)",
-                    trend: trend,
-                    deviceCount: Int(item.estimatedDeviceCount),
-                    stability: stability,
-                    score: item.aggregatedPresenceScore
-                )
-            )
-        }
-        return results.sorted { $0.score > $1.score }
-    }
-}
-
-final class IosEphemeralId {
-    private let rotationMinutes: Int = 5
-
-    func idFor(prefix: String, rawId: String, nowMillis: Int64) -> String {
-        let bucket = nowMillis / Int64(rotationMinutes * 60_000)
-        let material = "\(prefix)|\(rawId)|\(bucket)"
-        return sha256(material)
-    }
-
-    private func sha256(_ input: String) -> String {
-        guard let data = input.data(using: .utf8) else { return input }
-        if #available(iOS 13.0, *) {
-            let digest = SHA256.hash(data: data)
-            return digest.map { String(format: "%02x", $0) }.joined()
-        }
-        return input
     }
 }

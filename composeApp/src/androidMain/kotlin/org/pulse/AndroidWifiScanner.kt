@@ -7,19 +7,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
-import org.pulse.signal.SignalEngine
-import org.pulse.signal.SourceType
+import org.pulse.tracking.DeviceTracker
 
 class AndroidWifiScanner(
     private val context: Context,
-    private val engine: SignalEngine,
-    private val idGenerator: AndroidEphemeralId,
+    @Suppress("UNUSED_PARAMETER") tracker: DeviceTracker,
     private val scanIntervalMillis: Long = 10_000,
 ) {
     private val wifiManager =
@@ -33,20 +30,10 @@ class AndroidWifiScanner(
                 return
             }
             @SuppressLint("MissingPermission")
-            val results: List<ScanResult> = try {
+            try {
                 wifiManager.scanResults ?: emptyList()
             } catch (_: SecurityException) {
                 emptyList()
-            }
-            val now = System.currentTimeMillis()
-            for (result in results) {
-                val sourceId = idGenerator.idFor("wifi", result.BSSID ?: "unknown", now)
-                engine.addSample(
-                    sourceId = sourceId,
-                    rssi = result.level,
-                    timestampMillis = now,
-                    sourceType = SourceType.WIFI,
-                )
             }
         }
     }

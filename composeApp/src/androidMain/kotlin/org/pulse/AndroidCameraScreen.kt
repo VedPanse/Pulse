@@ -6,10 +6,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
 import android.os.Build
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -25,10 +21,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,12 +41,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,13 +58,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.pulse.signal.ClusterSnapshot
-import org.pulse.signal.SignalEngine
+import org.pulse.tracking.DeviceTracker
+import org.pulse.tracking.UiDot
 
-private const val WIFI_SCAN_ENABLED = true
+private const val WIFI_SCAN_ENABLED = false
 private const val PREFS_NAME = "pulse_prefs"
 private const val PREFS_HAS_SEEN_INTRO = "has_seen_intro"
-private const val CLUSTER_GRACE_MILLIS = 3_000L
 
 @Composable
 fun AndroidRootScreen() {
@@ -145,10 +140,9 @@ private fun IntroScreen(onStart: () -> Unit) {
 private fun AndroidCameraScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val engineState = remember { mutableStateOf(SignalEngine()) }
-    val engine = engineState.value
-    val ingestor = remember { AndroidSignalIngestor(context, engine, WIFI_SCAN_ENABLED) }
-    val clustersState = remember { mutableStateOf(emptyList<ClusterSnapshot>()) }
+    val tracker by remember { mutableStateOf(DeviceTracker()) }
+    val ingestor = remember { AndroidSignalIngestor(context, tracker, WIFI_SCAN_ENABLED) }
+    val dots by tracker.dotsFlow.collectAsState()
     var permissionsGranted by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
@@ -175,18 +169,14 @@ private fun AndroidCameraScreen() {
 
     LaunchedEffect(permissionsGranted) {
         while (permissionsGranted) {
-            val now = System.currentTimeMillis()
-            engine.tick(now)
-            clustersState.value = engine.getClustersSnapshot(now)
-            delay(1000)
+            tracker.tick(System.currentTimeMillis())
+            delay(200)
         }
     }
 
-    val motion = rememberDeviceMotionState()
     Box(modifier = Modifier.fillMaxSize()) {
         CameraPreview(permissionsGranted)
-        ClusterDots(clustersState, motion)
-        DebugMotionOverlay(motion)
+        DotCanvas(tracker = tracker, dots = dots)
         InfoButton(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -197,7 +187,7 @@ private fun AndroidCameraScreen() {
 
     if (showInfo) {
         InfoSheet(
-            clusters = clustersState.value,
+            tracker = tracker,
             sheetState = sheetState,
             onDismiss = {
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -247,8 +237,7 @@ private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.Life
 }
 
 @Composable
-private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>, motionState: MotionOffset) {
-    val clusters = clustersState.value
+private fun DotCanvas(tracker: DeviceTracker, dots: List<UiDot>) {
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
         initialValue = 0.6f,
@@ -259,53 +248,24 @@ private fun ClusterDots(clustersState: MutableState<List<ClusterSnapshot>>, moti
         ),
         label = "pulseScale",
     )
-    val layoutState = remember { ClusterLayoutState() }
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val now = System.currentTimeMillis()
-        val positions = layoutState.positionsFor(clusters, now)
-        val padding = 40f
-        val width = size.width - padding * 2
-        val height = size.height - padding * 2
-        val xShift = (width * 0.35f) * motionState.x
-        val yShift = (height * 0.25f) * motionState.y
-        clusters.forEach { cluster ->
-            val relative = positions[cluster.clusterId] ?: OffsetSeed(0.5f, 0.5f)
-            val cx = padding + width * relative.x + xShift
-            val cy = padding + height * relative.y + yShift
-            val radius = 8f * pulse
+        tracker.setViewport(size.width, size.height)
+        dots.forEach { dot ->
+            val radius = (6f + 6f * dot.confidence.toFloat()) * pulse
             drawCircle(
                 color = Color(0xFFEF4444),
                 radius = radius,
-                center = androidx.compose.ui.geometry.Offset(cx, cy),
-                alpha = 0.8f,
+                center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
+                alpha = 0.85f,
             )
             drawCircle(
                 color = Color(0xFFEF4444),
-                radius = 18f * pulse,
-                center = androidx.compose.ui.geometry.Offset(cx, cy),
-                alpha = 0.4f,
+                radius = radius * 2f,
+                center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
+                alpha = 0.35f,
                 style = Stroke(width = 2f),
             )
         }
-    }
-}
-
-@Composable
-private fun DebugMotionOverlay(motionState: MotionOffset) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-        contentAlignment = Alignment.TopStart,
-    ) {
-        Text(
-            text = "tiltX=${"%.2f".format(motionState.x)} tiltY=${"%.2f".format(motionState.y)}",
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            modifier = Modifier
-                .background(Color(0x99000000), RoundedCornerShape(8.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
     }
 }
 
@@ -334,18 +294,12 @@ private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InfoSheet(
-    clusters: List<ClusterSnapshot>,
+    tracker: DeviceTracker,
     sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
 ) {
-    val totalDevices = clusters.sumOf { it.estimatedDeviceCount }
-    val confidence = when {
-        clusters.isEmpty() -> "Low"
-        clusters.any { it.confidence == org.pulse.signal.ConfidenceLevel.High } -> "High"
-        clusters.any { it.confidence == org.pulse.signal.ConfidenceLevel.Medium } -> "Medium"
-        else -> "Low"
-    }
-    val stationaryCount = clusters.count { it.stabilityScore >= 0.7f }
+    val summary = tracker.getSummarySnapshot()
+    val debug = tracker.getDebugSnapshot(System.currentTimeMillis())
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -359,99 +313,37 @@ private fun InfoSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "We found $totalDevices devices around you.",
+                text = "We found ${summary.totalDevices} devices around you.",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Confidence: $confidence", color = Color(0xFFE0E0E0))
-                Text("Stationary: $stationaryCount", color = Color(0xFFE0E0E0))
+                Text("Confidence: ${summary.confidenceLevel}", color = Color(0xFFE0E0E0))
+                Text("Stationary: ${summary.stationaryCount}", color = Color(0xFFE0E0E0))
             }
             Text(
                 text = "Passive Bluetooth signals only. No identities stored.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFAAAAAA),
             )
+            Text(
+                text = "Tracks: ${debug.totalTracks} • Dots: ${debug.trackableCount}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFAAAAAA),
+            )
+            debug.topDevices.forEach { device ->
+                Text(
+                    text = "${device.keyPrefix}  rssi=${"%.1f".format(device.rssiEma)}  " +
+                        "phone=${"%.2f".format(device.phoneScore)}  " +
+                        "conf=${"%.2f".format(device.confidence)}  " +
+                        "dt=${device.lastSeenDeltaMs}ms",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF888888),
+                )
+            }
             Box(modifier = Modifier.height(12.dp))
         }
     }
-}
-
-private data class OffsetSeed(val x: Float, val y: Float)
-
-private class ClusterLayoutState {
-    private val slotSeeds = listOf(
-        OffsetSeed(0.2f, 0.25f),
-        OffsetSeed(0.5f, 0.25f),
-        OffsetSeed(0.8f, 0.25f),
-        OffsetSeed(0.2f, 0.5f),
-        OffsetSeed(0.5f, 0.5f),
-        OffsetSeed(0.8f, 0.5f),
-        OffsetSeed(0.2f, 0.75f),
-        OffsetSeed(0.5f, 0.75f),
-        OffsetSeed(0.8f, 0.75f),
-    )
-    private val assignments = mutableMapOf<String, Int>()
-    private val lastSeen = mutableMapOf<String, Long>()
-
-    fun positionsFor(clusters: List<ClusterSnapshot>, nowMillis: Long): Map<String, OffsetSeed> {
-        val ordered = clusters.sortedByDescending { it.aggregatedPresenceScore }
-        val used = mutableSetOf<Int>()
-        for (cluster in ordered) {
-            val existing = assignments[cluster.clusterId]
-            val slot = when {
-                existing != null && existing in slotSeeds.indices && existing !in used -> existing
-                else -> nextFreeSlot(used)
-            }
-            assignments[cluster.clusterId] = slot
-            used += slot
-            lastSeen[cluster.clusterId] = nowMillis
-        }
-        val iterator = assignments.keys.iterator()
-        while (iterator.hasNext()) {
-            val id = iterator.next()
-            val seen = lastSeen[id] ?: 0L
-            if (ordered.none { it.clusterId == id } && nowMillis - seen > CLUSTER_GRACE_MILLIS) {
-                iterator.remove()
-                lastSeen.remove(id)
-            }
-        }
-        return assignments.mapValues { slotSeeds[it.value % slotSeeds.size] }
-    }
-
-    private fun nextFreeSlot(used: Set<Int>): Int {
-        for (index in slotSeeds.indices) {
-            if (index !in used) return index
-        }
-        return used.size % slotSeeds.size
-    }
-}
-
-private data class MotionOffset(val x: Float, val y: Float)
-
-@Composable
-private fun rememberDeviceMotionState(): MotionOffset {
-    val context = LocalContext.current
-    val motionState = remember { mutableStateOf(MotionOffset(0f, 0f)) }
-    DisposableEffect(Unit) {
-        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
-            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        if (sensor == null) return@DisposableEffect onDispose {}
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                motionState.value = MotionOffset(
-                    x = (event.values[0] / SensorManager.GRAVITY_EARTH).coerceIn(-1f, 1f),
-                    y = (event.values[1] / SensorManager.GRAVITY_EARTH).coerceIn(-1f, 1f),
-                )
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-        }
-        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
-        onDispose { sensorManager.unregisterListener(listener) }
-    }
-    return motionState.value
 }
 
 private fun requiredPermissions(enableWifiScan: Boolean): List<String> {
