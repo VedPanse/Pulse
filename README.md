@@ -1,64 +1,105 @@
 # Pulse
 
-**Offline, privacy-preserving survivor presence detection using ambient smartphone signals**
+![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin\&logoColor=white)
+![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4)
+![Android](https://img.shields.io/badge/Android-Supported-3DDC84?logo=android\&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-Supported-000000?logo=apple\&logoColor=white)
+![Offline](https://img.shields.io/badge/Offline-First-success)
+![Privacy](https://img.shields.io/badge/Privacy-No%20Data%20Collected-blue)
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF)](https://kotlinlang.org/)
-[![Platforms](https://img.shields.io/badge/Platforms-Android%20%7C%20iOS-blue)](#)
-[![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
-[![Contest](https://img.shields.io/badge/Kotlin%20Student%20Contest-2026-orange)](#)
-[![Status](https://img.shields.io/badge/Status-Prototype-critical)](#)
+---
+
+## Goal
+
+Pulse helps **rescuers, responders, and civilians detect nearby human presence** in environments where visibility, connectivity, or communication is limited.
+
+In disaster scenarios such as collapsed buildings, smoke-filled structures, power outages, or low-visibility search areas, people often carry smartphones even when they cannot actively signal for help. These phones continue emitting short-range radio signals.
+
+Pulse passively observes these ambient signals and infers **probable nearby device presence** based on consistent behavior over time. This enables responders to identify likely survivor locations, distinguish stationary presence from transient movement, and operate **fully offline**, without infrastructure or identity data.
+
+Pulse does **not** identify individuals. It detects **presence**.
 
 ---
 
 ## Overview
 
-When disasters strike, **communication fails first**.
-
-Survivors may be unconscious, trapped, or unable to interact with their phones. Networks collapse. Infrastructure is unreliable. Most emergency systems assume *active participation* — tapping a screen, sending a signal, opening an app.
-
-**Pulse is built on a different assumption**:
-
-> *Human presence can be inferred without user interaction, internet access, or identity.*
-
-Pulse is a **phone-only Android + iOS application** that passively detects *probable human presence* by analyzing unavoidable ambient radio emissions already produced by smartphones (e.g. Bluetooth Low Energy advertisements).
-
-No accounts. No pairing. No cloud. No identification.
-
----
-
-## Why Pulse Is Novel
-
-Pulse does **not** attempt communication, tracking, or identification.
-
-Instead, it treats phones as **passive beacons**, similar to RFID, and models *signal behavior over time* to infer whether a human is likely present nearby.
-
-**Key differences from existing approaches:**
-
-| Traditional Systems        | Pulse                           |
-| -------------------------- | ------------------------------- |
-| Require user interaction   | Fully passive                   |
-| Depend on networks         | Fully offline                   |
-| Identify devices or people | Detects presence only           |
-| One-shot pings             | Time-based persistence modeling |
-| Server-centric             | On-device only                  |
-
-Pulse focuses on **determinism and signal physics**, not machine-learning guesswork.
-
----
-
-## Core Idea
-
 Modern smartphones continuously emit short-range radio signals even when locked.
 
-Pulse observes these signals and evaluates:
+Pulse evaluates these signals over time and focuses on **behavior**, not single events:
 
 * **Persistence** — does a signal remain over time?
-* **Stability** — does it decay naturally or fluctuate erratically?
-* **Clustering** — do multiple signals form spatial/temporal groups?
+* **Stability** — does it decay naturally or fluctuate?
+* **Clustering** — do multiple signals correlate spatially or temporally?
 * **Motion behavior** — stationary vs transient sources
 
 A single ping is meaningless.
 **Consistent behavior over time is not.**
+
+Pulse is a **phone-only**, **offline**, **privacy-preserving** mobile app built with **Kotlin Multiplatform** for Android and iOS.
+
+---
+
+## How to Run the App
+
+### Prerequisites
+
+* macOS
+* Android Studio (Giraffe or newer)
+* Xcode 15+ (for iOS)
+* Physical Android phone or iPhone
+* USB cable
+
+No accounts, servers, or API keys are required.
+
+---
+
+### Run on Android (Recommended)
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/VedPanse/Pulse.git
+   cd Pulse
+   ```
+
+2. **Open in Android Studio**
+
+   * Open the project root
+   * Select the **Android app module** (`app` / `androidApp`)
+   * Wait for Gradle sync to complete
+
+3. **Enable USB debugging on the phone**
+
+   * Settings → About phone → tap *Build number* 7×
+   * Settings → Developer options → **USB debugging ON**
+
+4. **Connect and run**
+
+   * Unlock the phone and approve the debugging prompt
+   * Select the physical device in the toolbar
+   * Click ▶ **Run**
+
+The app installs and launches directly on the phone.
+
+---
+
+### Run on iOS
+
+1. Open `iosApp` in **Xcode**
+2. Select a connected iPhone
+3. Set signing with a free Apple ID
+4. Click ▶ **Run**
+
+---
+
+## What Happens on Launch
+
+* Passively listens for ambient Bluetooth Low Energy signals
+* Scores persistence, variance, and motion over time
+* Visualizes **probable nearby device presence**
+* Operates fully **offline**
+
+No data is stored or transmitted.
 
 ---
 
@@ -68,27 +109,25 @@ A single ping is meaningless.
 
 Pulse is built using **Kotlin Multiplatform** with a strict separation of concerns.
 
-### Shared Core (Kotlin Multiplatform — `commonMain`)
+### Shared Core (`commonMain`)
 
-All detection intelligence lives in shared Kotlin code:
+All detection logic lives in shared Kotlin code:
 
 * Signal normalization
 * Rolling time windows
 * Presence confidence scoring
 * Temporal decay modeling
 * Motion classification
-* Spatial & temporal clustering
-* Deterministic scoring logic
+* Spatial and temporal clustering
 
 This code is compiled **unchanged** for both Android and iOS.
 
-### Platform Layers (Thin, Ingest-Only)
+### Platform Layers
 
-* **Android**: Bluetooth LE scanning & permissions
+* **Android**: Bluetooth LE scanning and permissions
 * **iOS**: CoreBluetooth scanning (within OS constraints)
 
-Platform code is limited to **signal ingestion only**.
-No detection logic is duplicated.
+Platform code is limited to signal ingestion only.
 
 ---
 
@@ -97,8 +136,7 @@ No detection logic is duplicated.
 Pulse enforces hard constraints by design:
 
 * No internet access
-* No servers
-* No analytics
+* No servers or analytics
 * No device identifiers
 * No MAC address storage
 * No persistent data across restarts
@@ -109,107 +147,17 @@ Pulse detects **presence**, not **people**.
 
 ---
 
-## Demo Scenario (How to Evaluate)
-
-Pulse is designed to be judged through simple, reproducible setups:
-
-1. Place two stationary phones in a room
-   → A stable cluster forms over time
-
-2. Walk through the room with a phone
-   → Classified as unstable / transient
-
-3. Turn off a stationary phone
-   → Signal decays gradually, not instantly
-
-4. Enable airplane mode + Bluetooth only
-   → Detection continues fully offline
-
----
-
-## Why Kotlin Multiplatform Was Essential
-
-Pulse’s correctness depends on **identical behavior across platforms**.
-
-Kotlin Multiplatform enables:
-
-* One shared signal model
-* One scoring algorithm
-* One clustering implementation
-* Identical behavior on Android and iOS
-
-This avoids divergence, reduces bugs, and ensures fairness and determinism — critical for safety-oriented systems.
-
----
-
 ## Project Structure
 
 ```
-.
-├── composeApp/
-│   └── src/
-│       ├── commonMain/      # Shared detection core (KMP)
-│       ├── androidMain/     # Android BLE ingestion
-│       └── iosMain/         # iOS BLE ingestion
-├── iosApp/                  # iOS app entry point
-├── assets/
-│   └── systems.png          # Architecture diagram
-└── README.md
+Pulse/
+├── shared/      # Kotlin Multiplatform detection logic
+├── androidApp/  # Android application wrapper
+├── iosApp/      # iOS application wrapper
 ```
-
----
-
-## Build & Run
-
-### Android
-
-```bash
-./gradlew :composeApp:assembleDebug
-```
-
-Run on a physical Android device with Bluetooth enabled.
-
-### iOS
-
-Open `iosApp/` in Xcode and run on a physical iPhone.
-
-> Note: iOS simulator does not emit real Bluetooth signals.
-> Use a real device for meaningful results.
-
----
-
-## Project Status
-
-Pulse is an **early-stage prototype** focused on:
-
-* Correctness
-* Determinism
-* Clear demonstration of passive detection
-
-Future work may explore additional signal sources and improved visualization, but the core detection model is intentionally simple and explainable.
 
 ---
 
 ## License
 
-Apache 2.0
-
----
-
-## Why This Matters
-
-In disaster response, **doing nothing should not mean being invisible**.
-
-Pulse explores how existing devices can quietly signal life —
-even when their owners cannot.
-
----
-
-If you want, I can also:
-
-* **Tighten this further to exactly ~300 words for the essay**
-* **Add a “Judge Quick Start” section**
-* **Rewrite the intro to be even more competition-optimized**
-* **Cross-check wording against past winning Kotlin projects**
-
-Just tell me what to tweak.
+This project is licensed under the [MIT License](LICENSE).
