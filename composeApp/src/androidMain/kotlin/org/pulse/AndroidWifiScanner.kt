@@ -24,34 +24,39 @@ class AndroidWifiScanner(
     private val handler = Handler(Looper.getMainLooper())
     private var isRegistered = false
 
-    private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (!hasWifiPermission()) {
-                return
-            }
-            @SuppressLint("MissingPermission")
-            try {
-                wifiManager.scanResults ?: emptyList()
-            } catch (_: SecurityException) {
-                emptyList()
-            }
-        }
-    }
-
-    private val scanRunnable = object : Runnable {
-        override fun run() {
-            try {
+    private val receiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?,
+            ) {
                 if (!hasWifiPermission()) {
-                    handler.postDelayed(this, scanIntervalMillis)
                     return
                 }
-                wifiManager.startScan()
-            } catch (_: SecurityException) {
-                // Permissions are handled by the activity.
+                @SuppressLint("MissingPermission")
+                try {
+                    wifiManager.scanResults ?: emptyList()
+                } catch (_: SecurityException) {
+                    emptyList()
+                }
             }
-            handler.postDelayed(this, scanIntervalMillis)
         }
-    }
+
+    private val scanRunnable =
+        object : Runnable {
+            override fun run() {
+                try {
+                    if (!hasWifiPermission()) {
+                        handler.postDelayed(this, scanIntervalMillis)
+                        return
+                    }
+                    wifiManager.startScan()
+                } catch (_: SecurityException) {
+                    // Permissions are handled by the activity.
+                }
+                handler.postDelayed(this, scanIntervalMillis)
+            }
+        }
 
     fun start() {
         if (!isRegistered) {
@@ -72,22 +77,23 @@ class AndroidWifiScanner(
         }
     }
 
-    private fun hasWifiPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    private fun hasWifiPermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
                 context,
-                Manifest.permission.NEARBY_WIFI_DEVICES
+                Manifest.permission.NEARBY_WIFI_DEVICES,
             ) == PackageManager.PERMISSION_GRANTED
         } else {
-            val fine = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            val coarse = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
+            val fine =
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
+            val coarse =
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
             fine || coarse
         }
-    }
 }

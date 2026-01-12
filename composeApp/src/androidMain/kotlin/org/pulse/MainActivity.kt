@@ -13,13 +13,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            AndroidRootScreen()
+            androidRootScreen()
         }
     }
 }
 
 @Preview
 @Composable
-fun AppAndroidPreview() {
-    AndroidRootScreen()
+fun appAndroidPreview() {
+    androidRootScreen()
 }

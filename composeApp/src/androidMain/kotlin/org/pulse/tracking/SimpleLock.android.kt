@@ -6,7 +6,5 @@ import kotlin.concurrent.withLock
 actual class SimpleLock {
     private val lock = ReentrantLock()
 
-    actual fun <T> withLock(block: () -> T): T {
-        return lock.withLock(block)
-    }
+    actual fun <T> withLock(block: () -> T): T = lock.withLock(block)
 }

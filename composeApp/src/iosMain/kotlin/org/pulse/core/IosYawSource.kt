@@ -2,8 +2,8 @@ package org.pulse.core
 
 import platform.CoreMotion.CMMotionManager
 import platform.Foundation.NSDate
-import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.NSOperationQueue
+import platform.Foundation.timeIntervalSince1970
 
 class IosYawSource {
     private val motionManager = CMMotionManager()

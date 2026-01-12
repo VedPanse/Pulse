@@ -21,10 +21,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,46 +35,51 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.pulse.core.CompassTracker
+import org.pulse.core.DebugDevice
 import org.pulse.core.DebugSnapshot
 import org.pulse.core.UiDot
+import kotlin.math.roundToInt
 
 private const val WIFI_SCAN_ENABLED = false
 private const val PREFS_NAME = "pulse_prefs"
 private const val PREFS_HAS_SEEN_INTRO = "has_seen_intro"
 
 @Composable
-fun AndroidRootScreen() {
+fun androidRootScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
     var hasSeenIntro by remember { mutableStateOf(prefs.getBoolean(PREFS_HAS_SEEN_INTRO, false)) }
     if (hasSeenIntro) {
-        AndroidCameraScreen()
+        androidCameraScreen()
     } else {
-        IntroScreen(
+        introScreen(
             onStart = {
                 prefs.edit().putBoolean(PREFS_HAS_SEEN_INTRO, true).apply()
                 hasSeenIntro = true
@@ -84,21 +89,24 @@ fun AndroidRootScreen() {
 }
 
 @Composable
-private fun IntroScreen(onStart: () -> Unit) {
+private fun introScreen(onStart: () -> Unit) {
     val transition = rememberInfiniteTransition(label = "introPulse")
-    val pulse by transition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "introPulseScale",
-    )
+    val pulse by
+        transition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 1.1f,
+            animationSpec =
+                infiniteRepeatable(
+                    animation = tween(durationMillis = 1400),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+            label = "introPulseScale",
+        )
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0B0C0E)),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B0C0E)),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -126,19 +134,20 @@ private fun IntroScreen(onStart: () -> Unit) {
             )
             TextButton(
                 onClick = onStart,
-                modifier = Modifier
-                    .height(44.dp)
-                    .padding(horizontal = 24.dp)
-                    .background(Color.White, RoundedCornerShape(22.dp)),
+                modifier =
+                    Modifier
+                        .height(44.dp)
+                        .padding(horizontal = 24.dp)
+                        .background(Color.White, RoundedCornerShape(22.dp)),
             ) {
-                Text("Start scanning", color = Color.Black)
+                Text(text = "Start scanning", color = Color.Black)
             }
         }
     }
 }
 
 @Composable
-private fun AndroidCameraScreen() {
+private fun androidCameraScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val tracker by remember { mutableStateOf(CompassTracker()) }
@@ -152,12 +161,13 @@ private fun AndroidCameraScreen() {
     val scope = rememberCoroutineScope()
     val yawSource = remember { AndroidYawSource(context) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        cameraGranted = results[Manifest.permission.CAMERA] == true
-        scanGranted = hasBleScanPermission(results)
-    }
+    val permissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions(),
+        ) { results ->
+            cameraGranted = results[Manifest.permission.CAMERA] == true
+            scanGranted = hasBleScanPermission(results)
+        }
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(requiredPermissions(WIFI_SCAN_ENABLED).toTypedArray())
@@ -182,19 +192,20 @@ private fun AndroidCameraScreen() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        CameraPreview(cameraGranted)
-        DotCanvas(tracker = tracker, dots = dots)
-        DebugHud(debug = debug, scanGranted = scanGranted, cameraGranted = cameraGranted)
-        InfoButton(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 32.dp, end = 16.dp),
+        cameraPreview(permissionsGranted = cameraGranted)
+        dotCanvas(tracker = tracker, dots = dots)
+        debugHud(debug = debug, scanGranted = scanGranted, cameraGranted = cameraGranted)
+        infoButton(
+            modifier =
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 32.dp, end = 16.dp),
             onClick = { showInfo = true },
         )
     }
 
     if (showInfo) {
-        InfoSheet(
+        infoSheet(
             tracker = tracker,
             sheetState = sheetState,
             onDismiss = {
@@ -207,35 +218,43 @@ private fun AndroidCameraScreen() {
 }
 
 @Composable
-private fun CameraPreview(permissionsGranted: Boolean) {
+private fun cameraPreview(permissionsGranted: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     if (!permissionsGranted) {
         Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {}
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+            contentAlignment = Alignment.Center,
+        )
         return
     }
     AndroidView(
         modifier = Modifier.fillMaxSize(),
-        factory = {
-            PreviewView(it).apply {
+        factory = { viewContext ->
+            PreviewView(viewContext).apply {
                 scaleType = PreviewView.ScaleType.FILL_CENTER
                 bindCamera(context, lifecycleOwner, this)
             }
-        }
+        },
     )
 }
 
-private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.LifecycleOwner, previewView: PreviewView) {
+private fun bindCamera(
+    context: Context,
+    lifecycleOwner: LifecycleOwner,
+    previewView: PreviewView,
+) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener(
         {
             val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().apply {
-                setSurfaceProvider(previewView.surfaceProvider)
-            }
+            val preview =
+                Preview.Builder().build().apply {
+                    setSurfaceProvider(previewView.surfaceProvider)
+                }
             val selector = CameraSelector.DEFAULT_BACK_CAMERA
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview)
@@ -245,17 +264,22 @@ private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.Life
 }
 
 @Composable
-private fun DotCanvas(tracker: CompassTracker, dots: List<UiDot>) {
+private fun dotCanvas(
+    tracker: CompassTracker,
+    dots: List<UiDot>,
+) {
     val transition = rememberInfiniteTransition(label = "pulse")
-    val pulse by transition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pulseScale",
-    )
+    val pulse by
+        transition.animateFloat(
+            initialValue = 0.6f,
+            targetValue = 1.2f,
+            animationSpec =
+                infiniteRepeatable(
+                    animation = tween(durationMillis = 1200),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+            label = "pulseScale",
+        )
     Canvas(modifier = Modifier.fillMaxSize()) {
         tracker.setViewport(size.width, size.height)
         dots.forEach { dot ->
@@ -263,13 +287,13 @@ private fun DotCanvas(tracker: CompassTracker, dots: List<UiDot>) {
             drawCircle(
                 color = Color(0xFFEF4444),
                 radius = radius,
-                center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
+                center = Offset(dot.screenX, dot.screenY),
                 alpha = dot.alpha,
             )
             drawCircle(
                 color = Color(0xFFEF4444),
                 radius = radius * 2f,
-                center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
+                center = Offset(dot.screenX, dot.screenY),
                 alpha = dot.alpha * 0.5f,
                 style = Stroke(width = 2f),
             )
@@ -278,17 +302,22 @@ private fun DotCanvas(tracker: CompassTracker, dots: List<UiDot>) {
 }
 
 @Composable
-private fun DebugHud(debug: DebugSnapshot, scanGranted: Boolean, cameraGranted: Boolean) {
+private fun debugHud(
+    debug: DebugSnapshot,
+    scanGranted: Boolean,
+    cameraGranted: Boolean,
+) {
     val yawDeg = Math.toDegrees(debug.yawRad)
     Column(
-        modifier = Modifier
-            .padding(top = 28.dp, start = 16.dp)
-            .background(Color(0x55000000), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier =
+            Modifier
+                .padding(top = 28.dp, start = 16.dp)
+                .background(Color(0x55000000), RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "Yaw ${"%.0f".format(yawDeg)}°",
+            text = "Yaw ${yawDeg.roundToInt()}°",
             style = MaterialTheme.typography.labelSmall,
             color = Color.White,
         )
@@ -309,9 +338,7 @@ private fun DebugHud(debug: DebugSnapshot, scanGranted: Boolean, cameraGranted: 
         )
         debug.topDevices.forEach { device ->
             Text(
-                text = "${device.keyPrefix} rssi=${"%.1f".format(device.rssiEma)} " +
-                    "p=${"%.2f".format(device.phoneScore)} c=${"%.2f".format(device.confidence)} " +
-                    "a=${"%.2f".format(device.azimuthConfidence)}",
+                text = formatHudLine(device),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFFB0B0B0),
             )
@@ -320,13 +347,17 @@ private fun DebugHud(debug: DebugSnapshot, scanGranted: Boolean, cameraGranted: 
 }
 
 @Composable
-private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun infoButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Box(
-        modifier = modifier
-            .size(40.dp)
-            .background(Color(0x66FFFFFF), CircleShape)
-            .border(1.dp, Color(0x88FFFFFF), CircleShape)
-            .clickable(onClick = onClick),
+        modifier =
+            modifier
+                .size(40.dp)
+                .background(Color(0x66FFFFFF), CircleShape)
+                .border(1.dp, Color(0x88FFFFFF), CircleShape)
+                .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.size(18.dp)) {
@@ -341,11 +372,10 @@ private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InfoSheet(
+private fun infoSheet(
     tracker: CompassTracker,
-    sheetState: androidx.compose.material3.SheetState,
+    sheetState: SheetState,
     onDismiss: () -> Unit,
 ) {
     val summary = tracker.getSummarySnapshot()
@@ -357,9 +387,10 @@ private fun InfoSheet(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
@@ -368,8 +399,8 @@ private fun InfoSheet(
                 color = Color.White,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Confidence: ${summary.confidenceLevel}", color = Color(0xFFE0E0E0))
-                Text("Stationary: ${summary.stationaryCount}", color = Color(0xFFE0E0E0))
+                Text(text = "Confidence: ${summary.confidenceLevel}", color = Color(0xFFE0E0E0))
+                Text(text = "Stationary: ${summary.stationaryCount}", color = Color(0xFFE0E0E0))
             }
             Text(
                 text = "Passive Bluetooth signals only. No identities stored.",
@@ -383,11 +414,7 @@ private fun InfoSheet(
             )
             debug.topDevices.forEach { device ->
                 Text(
-                    text = "${device.keyPrefix}  rssi=${"%.1f".format(device.rssiEma)}  " +
-                        "phone=${"%.2f".format(device.phoneScore)}  " +
-                        "conf=${"%.2f".format(device.confidence)}  " +
-                        "azi=${"%.2f".format(device.azimuthConfidence)}  " +
-                        "dt=${device.lastSeenDeltaMs}ms",
+                    text = formatDetailLine(device),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF888888),
                 )
@@ -397,10 +424,40 @@ private fun InfoSheet(
     }
 }
 
+private fun formatHudLine(device: DebugDevice): String =
+    buildString {
+        append(device.keyPrefix)
+        append(" rssi=")
+        append("%.1f".format(device.rssiEma))
+        append(" p=")
+        append("%.2f".format(device.phoneScore))
+        append(" c=")
+        append("%.2f".format(device.confidence))
+        append(" a=")
+        append("%.2f".format(device.azimuthConfidence))
+    }
+
+private fun formatDetailLine(device: DebugDevice): String =
+    buildString {
+        append(device.keyPrefix)
+        append("  rssi=")
+        append("%.1f".format(device.rssiEma))
+        append("  phone=")
+        append("%.2f".format(device.phoneScore))
+        append("  conf=")
+        append("%.2f".format(device.confidence))
+        append("  azi=")
+        append("%.2f".format(device.azimuthConfidence))
+        append("  dt=")
+        append(device.lastSeenDeltaMs)
+        append("ms")
+    }
+
 private fun requiredPermissions(enableWifiScan: Boolean): List<String> {
-    val permissions = mutableListOf(
-        Manifest.permission.CAMERA,
-    )
+    val permissions =
+        mutableListOf(
+            Manifest.permission.CAMERA,
+        )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         permissions += Manifest.permission.BLUETOOTH_SCAN
         permissions += Manifest.permission.BLUETOOTH_CONNECT
@@ -420,14 +477,13 @@ private fun requiredPermissions(enableWifiScan: Boolean): List<String> {
     return permissions.distinct()
 }
 
-private fun hasBleScanPermission(results: Map<String, Boolean>): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+private fun hasBleScanPermission(results: Map<String, Boolean>): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         results[Manifest.permission.BLUETOOTH_SCAN] == true
     } else {
         results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
     }
-}
 
 private fun scanAgeLabel(lastScanMs: Long): String {
     if (lastScanMs == 0L) return "--"

@@ -1,15 +1,15 @@
 package org.pulse.core
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import org.pulse.signal.ConfidenceLevel
+import org.pulse.tracking.SimpleLock
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import org.pulse.signal.ConfidenceLevel
-import org.pulse.tracking.SimpleLock
 
 class CompassTracker {
     private val tracks = mutableMapOf<String, DeviceTrack>()
@@ -18,16 +18,17 @@ class CompassTracker {
     private val _dotsFlow = MutableStateFlow<List<UiDot>>(emptyList())
     val dotsFlow: StateFlow<List<UiDot>> = _dotsFlow
 
-    private val _debugFlow = MutableStateFlow(
-        DebugSnapshot(
-            totalTracks = 0,
-            trackableCount = 0,
-            yawRad = 0.0,
-            scanCount = 0,
-            lastScanMs = 0,
-            topDevices = emptyList(),
+    private val _debugFlow =
+        MutableStateFlow(
+            DebugSnapshot(
+                totalTracks = 0,
+                trackableCount = 0,
+                yawRad = 0.0,
+                scanCount = 0,
+                lastScanMs = 0,
+                topDevices = emptyList(),
+            ),
         )
-    )
     val debugFlow: StateFlow<DebugSnapshot> = _debugFlow
 
     private var lastDots: List<UiDot> = emptyList()
@@ -39,7 +40,10 @@ class CompassTracker {
     private var lastYawMs: Long = 0
     private var scanCount: Int = 0
 
-    fun setViewport(widthPx: Float, heightPx: Float) {
+    fun setViewport(
+        widthPx: Float,
+        heightPx: Float,
+    ) {
         lock.withLock {
             if (widthPx == viewportWidth && heightPx == viewportHeight) return@withLock
             viewportWidth = widthPx
@@ -60,18 +64,19 @@ class CompassTracker {
         lock.withLock {
             lastScanMs = max(lastScanMs, event.timestampMs)
             scanCount += 1
-            val track = tracks[event.key] ?: DeviceTrack(
-                key = event.key,
-                lastSeenMs = event.timestampMs,
-                seenCount = 0,
-                rssiEma = event.rssi.toDouble(),
-                rssiVar = 0.0,
-                confidence = 0.0,
-                phoneScore = 0.0,
-                azimuthRad = seedAzimuth(event.key),
-                azimuthConfidence = 0.08,
-                txPower = event.txPower,
-            ).also { tracks[event.key] = it }
+            val track =
+                tracks[event.key] ?: DeviceTrack(
+                    key = event.key,
+                    lastSeenMs = event.timestampMs,
+                    seenCount = 0,
+                    rssiEma = event.rssi.toDouble(),
+                    rssiVar = 0.0,
+                    confidence = 0.0,
+                    phoneScore = 0.0,
+                    azimuthRad = seedAzimuth(event.key),
+                    azimuthConfidence = 0.08,
+                    txPower = event.txPower,
+                ).also { tracks[event.key] = it }
 
             if (track.seenCount == 0 && lastYawMs != 0L) {
                 track.azimuthRad = lastYawRad
@@ -119,15 +124,16 @@ class CompassTracker {
 
     fun getDotsSnapshot(): List<UiDot> = lastDots
 
-    fun getSummarySnapshot(): TrackerSummary {
-        return lock.withLock {
+    fun getSummarySnapshot(): TrackerSummary =
+        lock.withLock {
             val trackable = tracks.values.filter { isTrackable(it) }
             val avgConfidence = if (trackable.isEmpty()) 0.0 else trackable.map { it.confidence }.average()
-            val confidenceLevel = when {
-                avgConfidence >= 0.66 -> ConfidenceLevel.High
-                avgConfidence >= 0.33 -> ConfidenceLevel.Medium
-                else -> ConfidenceLevel.Low
-            }
+            val confidenceLevel =
+                when {
+                    avgConfidence >= 0.66 -> ConfidenceLevel.High
+                    avgConfidence >= 0.33 -> ConfidenceLevel.Medium
+                    else -> ConfidenceLevel.Low
+                }
             val stationaryCount = trackable.count { stabilityScore(it) >= 0.7 }
             TrackerSummary(
                 totalDevices = trackable.size,
@@ -135,13 +141,11 @@ class CompassTracker {
                 stationaryCount = stationaryCount,
             )
         }
-    }
 
-    fun getDebugSnapshot(nowMs: Long): DebugSnapshot {
-        return lock.withLock {
+    fun getDebugSnapshot(nowMs: Long): DebugSnapshot =
+        lock.withLock {
             buildDebugSnapshot(nowMs)
         }
-    }
 
     private fun updateAzimuthLocked(track: DeviceTrack) {
         if (lastYawMs == 0L) return
@@ -165,29 +169,30 @@ class CompassTracker {
         val centerY = viewportHeight / 2f
         val fovRad = 70.0 / 180.0 * PI
         val margin = (viewportWidth * 0.05f).coerceAtLeast(14f)
-        val dots = tracks.values.filter { isTrackable(it) }.map { track ->
-            val range = estimateRange(track)
-            val rel = wrapPi(track.azimuthRad - lastYawRad)
-            val xOffset = (rel / (fovRad / 2.0)) * (viewportWidth * 0.45f)
-            val x = (centerX + xOffset.toFloat()).coerceIn(margin, viewportWidth - margin)
-            val t = ((range - 1.0) / (12.0 - 1.0)).coerceIn(0.0, 1.0)
-            val yOffset = (-0.15 + 0.45 * t) * viewportHeight
-            val y = (centerY + yOffset.toFloat()).coerceIn(margin, viewportHeight - margin)
-            val sizeBase = lerp(10.0, 34.0, (1.0 - range / 12.0).coerceIn(0.0, 1.0))
-            val size = sizeBase * lerp(0.7, 1.2, track.confidence.coerceIn(0.0, 1.0))
-            val alpha = track.confidence.coerceIn(0.2, 1.0)
-            UiDot(
-                key = track.key,
-                confidence = track.confidence,
-                phoneScore = track.phoneScore,
-                rssiEma = track.rssiEma,
-                rangeMeters = range,
-                screenX = x,
-                screenY = y,
-                sizePx = size.toFloat(),
-                alpha = alpha.toFloat(),
-            )
-        }
+        val dots =
+            tracks.values.filter { isTrackable(it) }.map { track ->
+                val range = estimateRange(track)
+                val rel = wrapPi(track.azimuthRad - lastYawRad)
+                val xOffset = (rel / (fovRad / 2.0)) * (viewportWidth * 0.45f)
+                val x = (centerX + xOffset.toFloat()).coerceIn(margin, viewportWidth - margin)
+                val t = ((range - 1.0) / (12.0 - 1.0)).coerceIn(0.0, 1.0)
+                val yOffset = (-0.15 + 0.45 * t) * viewportHeight
+                val y = (centerY + yOffset.toFloat()).coerceIn(margin, viewportHeight - margin)
+                val sizeBase = lerp(10.0, 34.0, (1.0 - range / 12.0).coerceIn(0.0, 1.0))
+                val size = sizeBase * lerp(0.7, 1.2, track.confidence.coerceIn(0.0, 1.0))
+                val alpha = track.confidence.coerceIn(0.2, 1.0)
+                UiDot(
+                    key = track.key,
+                    confidence = track.confidence,
+                    phoneScore = track.phoneScore,
+                    rssiEma = track.rssiEma,
+                    rangeMeters = range,
+                    screenX = x,
+                    screenY = y,
+                    sizePx = size.toFloat(),
+                    alpha = alpha.toFloat(),
+                )
+            }
         lastDots = dots
         _dotsFlow.value = dots
         _debugFlow.value = buildDebugSnapshot(max(lastTickMs, max(lastScanMs, lastYawMs)))
@@ -196,16 +201,17 @@ class CompassTracker {
     private fun buildDebugSnapshot(nowMs: Long): DebugSnapshot {
         val values = tracks.values.toList()
         val trackable = values.filter { isTrackable(it) }
-        val top = values.sortedByDescending { it.confidence }.take(3).map { track ->
-            DebugDevice(
-                keyPrefix = track.key.take(6),
-                rssiEma = track.rssiEma,
-                phoneScore = track.phoneScore,
-                confidence = track.confidence,
-                azimuthConfidence = track.azimuthConfidence,
-                lastSeenDeltaMs = max(0, nowMs - track.lastSeenMs),
-            )
-        }
+        val top =
+            values.sortedByDescending { it.confidence }.take(3).map { track ->
+                DebugDevice(
+                    keyPrefix = track.key.take(6),
+                    rssiEma = track.rssiEma,
+                    phoneScore = track.phoneScore,
+                    confidence = track.confidence,
+                    azimuthConfidence = track.azimuthConfidence,
+                    lastSeenDeltaMs = max(0, nowMs - track.lastSeenMs),
+                )
+            }
         return DebugSnapshot(
             totalTracks = values.size,
             trackableCount = trackable.size,
@@ -216,11 +222,12 @@ class CompassTracker {
         )
     }
 
-    private fun isTrackable(track: DeviceTrack): Boolean {
-        return track.confidence >= 0.35 && track.phoneScore >= 0.55
-    }
+    private fun isTrackable(track: DeviceTrack): Boolean = track.confidence >= 0.35 && track.phoneScore >= 0.55
 
-    private fun computePhoneScore(track: DeviceTrack, manufacturerId: Int?): Double {
+    private fun computePhoneScore(
+        track: DeviceTrack,
+        manufacturerId: Int?,
+    ): Double {
         val persistenceScore = min(1.0, track.seenCount / 12.0)
         val stabilityScore = stabilityScore(track)
         val manufacturerHint = if (manufacturerId != null && manufacturerId in phoneManufacturerIds) 0.15 else 0.0
@@ -246,9 +253,7 @@ class CompassTracker {
         return wrapPi(angle)
     }
 
-    private fun stableHash(text: String): Int {
-        return text.fold(0) { acc, char -> acc * 31 + char.code }
-    }
+    private fun stableHash(text: String): Int = text.fold(0) { acc, char -> acc * 31 + char.code }
 
     private fun wrapPi(value: Double): Double {
         var x = value
@@ -257,17 +262,22 @@ class CompassTracker {
         return x
     }
 
-    private fun angleDiff(target: Double, source: Double): Double {
-        return wrapPi(target - source)
-    }
+    private fun angleDiff(
+        target: Double,
+        source: Double,
+    ): Double = wrapPi(target - source)
 
-    private fun angleLerp(source: Double, target: Double, t: Double): Double {
-        return wrapPi(source + angleDiff(target, source) * t)
-    }
+    private fun angleLerp(
+        source: Double,
+        target: Double,
+        t: Double,
+    ): Double = wrapPi(source + angleDiff(target, source) * t)
 
-    private fun lerp(a: Double, b: Double, t: Double): Double {
-        return a + (b - a) * t
-    }
+    private fun lerp(
+        a: Double,
+        b: Double,
+        t: Double,
+    ): Double = a + (b - a) * t
 
     private companion object {
         val phoneManufacturerIds = setOf(0x004C, 0x0075, 0x00E0)

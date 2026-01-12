@@ -8,14 +8,15 @@ object DeviceKeyBuilder {
         localName: String?,
         rawAdvHash: String?,
     ): String {
-        val parts = listOf(
-            "android",
-            address.orEmpty(),
-            manufacturerId?.toString().orEmpty(),
-            serviceUuids.sorted().joinToString(","),
-            localName.orEmpty(),
-            rawAdvHash.orEmpty(),
-        )
+        val parts =
+            listOf(
+                "android",
+                address.orEmpty(),
+                manufacturerId?.toString().orEmpty(),
+                serviceUuids.sorted().joinToString(","),
+                localName.orEmpty(),
+                rawAdvHash.orEmpty(),
+            )
         return hashHex(parts.joinToString("|").encodeToByteArray())
     }
 }

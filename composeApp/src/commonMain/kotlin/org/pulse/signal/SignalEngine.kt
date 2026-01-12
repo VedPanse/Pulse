@@ -3,7 +3,6 @@ package org.pulse.signal
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
-import kotlin.math.min
 
 class SignalEngine(
     private val windowMillis: Long = 20_000,
@@ -13,7 +12,12 @@ class SignalEngine(
     private val sources = mutableMapOf<String, SourceState>()
     private val previousClusterScores = mutableMapOf<String, Float>()
 
-    fun addSample(sourceId: String, rssi: Int, timestampMillis: Long, sourceType: SourceType) {
+    fun addSample(
+        sourceId: String,
+        rssi: Int,
+        timestampMillis: Long,
+        sourceType: SourceType,
+    ) {
         val state = sources.getOrPut(sourceId) { SourceState(sourceId, windowMillis) }
         state.window.addSample(SignalSample(rssi, timestampMillis, sourceType))
         state.lastSeenMillis = timestampMillis
@@ -38,8 +42,10 @@ class SignalEngine(
 
     fun getClustersSnapshot(nowMillis: Long): List<ClusterSnapshot> {
         tick(nowMillis)
-        val candidates = sources.values.mapNotNull { it.toSnapshot() }
-            .filter { nowMillis - it.lastSeenMillis <= windowMillis * 2 && it.presenceScore > 0.05f }
+        val candidates =
+            sources.values
+                .mapNotNull { it.toSnapshot() }
+                .filter { nowMillis - it.lastSeenMillis <= windowMillis * 2 && it.presenceScore > 0.05f }
         if (candidates.isEmpty()) {
             return emptyList()
         }
@@ -47,26 +53,26 @@ class SignalEngine(
         val clusters = mutableListOf<ClusterBuilder>()
         val rssiThreshold = 8f
         for (source in sorted) {
-            val target = clusters.firstOrNull { builder ->
-                abs(builder.averageRssi - source.averageRssi) <= rssiThreshold &&
-                    abs(builder.lastSeenMillis - source.lastSeenMillis) <= windowMillis
-            }
+            val target =
+                clusters.firstOrNull { builder ->
+                    abs(builder.averageRssi - source.averageRssi) <= rssiThreshold &&
+                        abs(builder.lastSeenMillis - source.lastSeenMillis) <= windowMillis
+                }
             if (target != null) {
                 target.add(source)
             } else {
                 clusters.add(ClusterBuilder(source))
             }
         }
-        return clusters.map { builder ->
-            val snapshot = builder.toClusterSnapshot(previousClusterScores)
-            previousClusterScores[snapshot.clusterId] = snapshot.aggregatedPresenceScore
-            snapshot
-        }.sortedByDescending { it.aggregatedPresenceScore }
+        return clusters
+            .map { builder ->
+                val snapshot = builder.toClusterSnapshot(previousClusterScores)
+                previousClusterScores[snapshot.clusterId] = snapshot.aggregatedPresenceScore
+                snapshot
+            }.sortedByDescending { it.aggregatedPresenceScore }
     }
 
-    fun getClustersSnapshotArray(nowMillis: Long): Array<ClusterSnapshot> {
-        return getClustersSnapshot(nowMillis).toTypedArray()
-    }
+    fun getClustersSnapshotArray(nowMillis: Long): Array<ClusterSnapshot> = getClustersSnapshot(nowMillis).toTypedArray()
 
     private fun updatePresence(state: SourceState) {
         val samples = state.window.snapshot()
@@ -77,11 +83,12 @@ class SignalEngine(
         val variance = samples.map { (it.rssi - avg) * (it.rssi - avg) }.average().toFloat()
         state.averageRssi = avg
         state.variance = variance
-        state.motionState = when {
-            variance < 12f -> MotionState.Stationary
-            variance > 28f -> MotionState.Moving
-            else -> MotionState.Uncertain
-        }
+        state.motionState =
+            when {
+                variance < 12f -> MotionState.Stationary
+                variance > 28f -> MotionState.Moving
+                else -> MotionState.Uncertain
+            }
 
         val persistence = ((samples.size - minSamplesForPresence).toFloat() / 10f).coerceIn(0f, 1f)
         val stability = (1f - (variance / 80f)).coerceIn(0f, 1f)
@@ -89,12 +96,19 @@ class SignalEngine(
         state.presenceScore = lerp(state.presenceScore, target, 0.15f)
     }
 
-    private fun lerp(current: Float, target: Float, alpha: Float): Float {
+    private fun lerp(
+        current: Float,
+        target: Float,
+        alpha: Float,
+    ): Float {
         val clampedAlpha = alpha.coerceIn(0f, 1f)
         return current + (target - current) * clampedAlpha
     }
 
-    private class SourceState(val sourceId: String, windowMillis: Long) {
+    private class SourceState(
+        val sourceId: String,
+        windowMillis: Long,
+    ) {
         val window = SignalWindow(windowMillis)
         var presenceScore: Float = 0f
         var lastSeenMillis: Long = 0L
@@ -116,7 +130,9 @@ class SignalEngine(
         }
     }
 
-    private class ClusterBuilder(initial: SignalSourceSnapshot) {
+    private class ClusterBuilder(
+        initial: SignalSourceSnapshot,
+    ) {
         private val sources = mutableListOf(initial)
         var averageRssi: Float = initial.averageRssi
             private set
@@ -136,16 +152,18 @@ class SignalEngine(
             val deviceCount = sources.count { it.presenceScore > 0.2f }.coerceAtLeast(1)
             val clusterId = stableClusterId(sources.map { it.sourceId })
             val previous = previousScores[clusterId] ?: aggregated
-            val trend = when {
-                aggregated - previous > 0.05f -> Trend.Strengthening
-                previous - aggregated > 0.05f -> Trend.Weakening
-                else -> Trend.Stable
-            }
-            val confidence = when {
-                aggregated >= 0.66f -> ConfidenceLevel.High
-                aggregated >= 0.33f -> ConfidenceLevel.Medium
-                else -> ConfidenceLevel.Low
-            }
+            val trend =
+                when {
+                    aggregated - previous > 0.05f -> Trend.Strengthening
+                    previous - aggregated > 0.05f -> Trend.Weakening
+                    else -> Trend.Stable
+                }
+            val confidence =
+                when {
+                    aggregated >= 0.66f -> ConfidenceLevel.High
+                    aggregated >= 0.33f -> ConfidenceLevel.Medium
+                    else -> ConfidenceLevel.Low
+                }
             return ClusterSnapshot(
                 clusterId = clusterId,
                 aggregatedPresenceScore = aggregated,
@@ -165,13 +183,12 @@ class SignalEngine(
             return (1f - product).coerceIn(0f, 1f)
         }
 
-        private fun motionScore(state: MotionState): Float {
-            return when (state) {
+        private fun motionScore(state: MotionState): Float =
+            when (state) {
                 MotionState.Stationary -> 1f
                 MotionState.Moving -> 0f
                 MotionState.Uncertain -> 0.5f
             }
-        }
 
         private fun stableClusterId(sourceIds: List<String>): String {
             val sorted = sourceIds.sorted()

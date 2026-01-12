@@ -7,7 +7,9 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import org.pulse.core.YawSample
 
-class AndroidYawSource(context: Context) : SensorEventListener {
+class AndroidYawSource(
+    context: Context,
+) : SensorEventListener {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val rotationMatrix = FloatArray(9)
@@ -34,5 +36,8 @@ class AndroidYawSource(context: Context) : SensorEventListener {
         onYaw?.invoke(YawSample(timestampMs = System.currentTimeMillis(), yawRad = yaw))
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    override fun onAccuracyChanged(
+        sensor: Sensor?,
+        accuracy: Int,
+    ) = Unit
 }

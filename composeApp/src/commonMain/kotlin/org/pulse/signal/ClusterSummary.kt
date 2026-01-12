@@ -8,11 +8,12 @@ data class ClusterSummary(
 
 fun computeClusterSummary(clusters: List<ClusterSnapshot>): ClusterSummary {
     val totalDevices = clusters.sumOf { it.estimatedDeviceCount }
-    val confidence = when {
-        clusters.any { it.confidence == ConfidenceLevel.High } -> ConfidenceLevel.High
-        clusters.any { it.confidence == ConfidenceLevel.Medium } -> ConfidenceLevel.Medium
-        else -> ConfidenceLevel.Low
-    }
+    val confidence =
+        when {
+            clusters.any { it.confidence == ConfidenceLevel.High } -> ConfidenceLevel.High
+            clusters.any { it.confidence == ConfidenceLevel.Medium } -> ConfidenceLevel.Medium
+            else -> ConfidenceLevel.Low
+        }
     val stationaryCount = clusters.count { it.stabilityScore >= 0.7f }
     return ClusterSummary(
         totalDevices = totalDevices,
@@ -22,7 +23,5 @@ fun computeClusterSummary(clusters: List<ClusterSnapshot>): ClusterSummary {
 }
 
 class ClusterSummaryCalculator {
-    fun compute(clusters: List<ClusterSnapshot>): ClusterSummary {
-        return computeClusterSummary(clusters)
-    }
+    fun compute(clusters: List<ClusterSnapshot>): ClusterSummary = computeClusterSummary(clusters)
 }

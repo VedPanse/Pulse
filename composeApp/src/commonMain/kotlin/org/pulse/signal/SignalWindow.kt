@@ -1,6 +1,8 @@
 package org.pulse.signal
 
-class SignalWindow(private val windowMillis: Long) {
+class SignalWindow(
+    private val windowMillis: Long,
+) {
     private val samples = mutableListOf<SignalSample>()
 
     fun addSample(sample: SignalSample) {

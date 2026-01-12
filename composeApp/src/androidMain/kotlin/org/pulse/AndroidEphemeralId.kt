@@ -3,8 +3,14 @@ package org.pulse
 import java.security.MessageDigest
 import kotlin.math.floor
 
-class AndroidEphemeralId(private val rotationMinutes: Int = 5) {
-    fun idFor(prefix: String, rawId: String, nowMillis: Long): String {
+class AndroidEphemeralId(
+    private val rotationMinutes: Int = 5,
+) {
+    fun idFor(
+        prefix: String,
+        rawId: String,
+        nowMillis: Long,
+    ): String {
         val bucket = floor(nowMillis.toDouble() / (rotationMinutes * 60_000)).toLong()
         val material = "$prefix|$rawId|$bucket"
         return sha256(material)
