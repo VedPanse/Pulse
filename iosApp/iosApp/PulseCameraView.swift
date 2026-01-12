@@ -20,6 +20,7 @@ struct PulseCameraView: View {
                     ClusterDots(dots: viewModel.dots) { width, height in
                         viewModel.updateViewport(width: Float(width), height: Float(height))
                     }
+                    DebugHud(debug: viewModel.debug)
                     VStack {
                         HStack {
                             Spacer()
@@ -77,7 +78,7 @@ struct ClusterDots: View {
                     onViewport(size.width, size.height)
                 }
             ForEach(dots, id: \.key) { dot in
-                PulsingDot()
+                PulsingDot(size: CGFloat(dot.sizePx), alpha: Double(dot.alpha))
                     .position(x: CGFloat(dot.screenX), y: CGFloat(dot.screenY))
             }
         }
@@ -87,16 +88,18 @@ struct ClusterDots: View {
 
 struct PulsingDot: View {
     @State private var pulse = false
+    let size: CGFloat
+    let alpha: Double
 
     var body: some View {
         Circle()
-            .fill(Color.red.opacity(0.8))
-            .frame(width: pulse ? 20 : 10, height: pulse ? 20 : 10)
+            .fill(Color.red.opacity(alpha))
+            .frame(width: pulse ? size * 1.2 : size * 0.7, height: pulse ? size * 1.2 : size * 0.7)
             .overlay(
                 Circle()
-                    .stroke(Color.red.opacity(0.6), lineWidth: 2)
-                    .frame(width: pulse ? 36 : 20, height: pulse ? 36 : 20)
-                    .opacity(pulse ? 0.2 : 0.8)
+                    .stroke(Color.red.opacity(alpha * 0.7), lineWidth: 2)
+                    .frame(width: pulse ? size * 2.1 : size * 1.3, height: pulse ? size * 2.1 : size * 1.3)
+                    .opacity(pulse ? 0.25 : 0.8)
             )
             .onAppear {
                 withAnimation(
@@ -106,6 +109,45 @@ struct PulsingDot: View {
                     pulse.toggle()
                 }
             }
+    }
+}
+
+struct DebugHud: View {
+    let debug: DebugSnapshot?
+
+    var body: some View {
+        let yawDeg = (debug?.yawRad ?? 0) * 180 / Double.pi
+        let scanAge: String = {
+            guard let lastScanMs = debug?.lastScanMs, lastScanMs > 0 else { return "--" }
+            let ageSec = Int64(Date().timeIntervalSince1970 * 1000) - Int64(lastScanMs)
+            return "\(max(0, ageSec / 1000))s"
+        }()
+        VStack(alignment: .leading, spacing: 4) {
+            Text(String(format: "Yaw %.0f°", yawDeg))
+            Text("Tracks \(debug?.totalTracks ?? 0)  Dots \(debug?.trackableCount ?? 0)")
+            Text("Scans \(debug?.scanCount ?? 0)  Age \(scanAge)")
+            ForEach(debug?.topDevices ?? [], id: \.keyPrefix) { device in
+                Text(
+                    String(
+                        format: "%@ rssi=%.1f p=%.2f c=%.2f a=%.2f",
+                        device.keyPrefix,
+                        device.rssiEma,
+                        device.phoneScore,
+                        device.confidence,
+                        device.azimuthConfidence
+                    )
+                )
+            }
+        }
+        .font(.caption2)
+        .padding(8)
+        .background(Color.black.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .foregroundColor(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 28)
+        .padding(.leading, 16)
+        .allowsHitTesting(false)
     }
 }
 
@@ -175,7 +217,7 @@ struct InfoSheet: View {
     let debug: DebugSnapshot?
 
     var body: some View {
-        let totalDevices = Int(summary?.totalDevices ?? 0)
+        let totalDevices = Int(debug?.totalTracks ?? summary?.totalDevices ?? 0)
         let confidence: String = {
             guard let level = summary?.confidenceLevel else { return "Low" }
             switch level {
@@ -210,6 +252,7 @@ struct InfoSheet: View {
                         "\(device.keyPrefix)  rssi=\(String(format: "%.1f", device.rssiEma))  " +
                             "phone=\(String(format: "%.2f", device.phoneScore))  " +
                             "conf=\(String(format: "%.2f", device.confidence))  " +
+                            "azi=\(String(format: "%.2f", device.azimuthConfidence))  " +
                             "dt=\(device.lastSeenDeltaMs)ms"
                     )
                     .font(.footnote)

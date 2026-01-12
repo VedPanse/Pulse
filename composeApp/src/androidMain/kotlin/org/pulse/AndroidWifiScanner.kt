@@ -12,11 +12,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
-import org.pulse.tracking.DeviceTracker
+import org.pulse.core.CompassTracker
 
 class AndroidWifiScanner(
     private val context: Context,
-    @Suppress("UNUSED_PARAMETER") tracker: DeviceTracker,
+    @Suppress("UNUSED_PARAMETER") tracker: CompassTracker,
     private val scanIntervalMillis: Long = 10_000,
 ) {
     private val wifiManager =

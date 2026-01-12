@@ -6,13 +6,12 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.Build
-import org.pulse.tracking.BleScanEvent
-import org.pulse.tracking.DeviceKeyBuilder
-import org.pulse.tracking.DeviceTracker
+import org.pulse.core.BleScanEvent
+import org.pulse.core.CompassTracker
 import org.pulse.tracking.hashHex
 
 class AndroidBleScanner(
-    private val tracker: DeviceTracker,
+    private val tracker: CompassTracker,
 ) {
     private var scanner: BluetoothLeScanner? = null
 
@@ -31,24 +30,22 @@ class AndroidBleScanner(
             } else {
                 null
             }
-            val rawAdvHash = record?.bytes?.let { bytes -> hashHex(bytes) }
-            val deviceKey = DeviceKeyBuilder.fromAndroid(
-                address = device.address,
-                manufacturerId = manufacturerId,
-                serviceUuids = serviceUuids,
-                localName = record?.deviceName,
-                rawAdvHash = rawAdvHash,
-            )
+            val address = try {
+                device.address
+            } catch (_: SecurityException) {
+                null
+            }
+            val deviceKey = address?.takeIf { it.isNotBlank() }
+                ?: record?.bytes?.let { bytes -> hashHex(bytes) }
+                ?: hashHex("${manufacturerId ?: ""}|${serviceUuids.joinToString(",")}".encodeToByteArray())
             tracker.onScan(
                 BleScanEvent(
-                    platform = "android",
+                    key = deviceKey,
                     timestampMs = now,
                     rssi = result.rssi,
                     txPower = txPower,
                     manufacturerId = manufacturerId,
                     serviceUuids = serviceUuids,
-                    rawAdvHash = rawAdvHash,
-                    deviceKey = deviceKey,
                 ),
             )
         }

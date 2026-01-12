@@ -58,8 +58,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.pulse.tracking.DeviceTracker
-import org.pulse.tracking.UiDot
+import org.pulse.core.CompassTracker
+import org.pulse.core.DebugSnapshot
+import org.pulse.core.UiDot
 
 private const val WIFI_SCAN_ENABLED = false
 private const val PREFS_NAME = "pulse_prefs"
@@ -140,43 +141,50 @@ private fun IntroScreen(onStart: () -> Unit) {
 private fun AndroidCameraScreen() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val tracker by remember { mutableStateOf(DeviceTracker()) }
+    val tracker by remember { mutableStateOf(CompassTracker()) }
     val ingestor = remember { AndroidSignalIngestor(context, tracker, WIFI_SCAN_ENABLED) }
     val dots by tracker.dotsFlow.collectAsState()
-    var permissionsGranted by remember { mutableStateOf(false) }
+    val debug by tracker.debugFlow.collectAsState()
+    var cameraGranted by remember { mutableStateOf(false) }
+    var scanGranted by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
+    val yawSource = remember { AndroidYawSource(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        permissionsGranted = results.values.all { it }
+        cameraGranted = results[Manifest.permission.CAMERA] == true
+        scanGranted = hasBleScanPermission(results)
     }
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(requiredPermissions(WIFI_SCAN_ENABLED).toTypedArray())
     }
 
-    DisposableEffect(lifecycleOwner, permissionsGranted) {
-        if (permissionsGranted) {
+    DisposableEffect(lifecycleOwner, scanGranted) {
+        if (scanGranted) {
             ingestor.start()
+            yawSource.start { sample -> tracker.onYaw(sample) }
         }
         onDispose {
+            yawSource.stop()
             ingestor.stop()
         }
     }
 
-    LaunchedEffect(permissionsGranted) {
-        while (permissionsGranted) {
+    LaunchedEffect(scanGranted) {
+        while (scanGranted) {
             tracker.tick(System.currentTimeMillis())
             delay(200)
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        CameraPreview(permissionsGranted)
+        CameraPreview(cameraGranted)
         DotCanvas(tracker = tracker, dots = dots)
+        DebugHud(debug = debug, scanGranted = scanGranted, cameraGranted = cameraGranted)
         InfoButton(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -237,7 +245,7 @@ private fun bindCamera(context: Context, lifecycleOwner: androidx.lifecycle.Life
 }
 
 @Composable
-private fun DotCanvas(tracker: DeviceTracker, dots: List<UiDot>) {
+private fun DotCanvas(tracker: CompassTracker, dots: List<UiDot>) {
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulse by transition.animateFloat(
         initialValue = 0.6f,
@@ -251,19 +259,61 @@ private fun DotCanvas(tracker: DeviceTracker, dots: List<UiDot>) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         tracker.setViewport(size.width, size.height)
         dots.forEach { dot ->
-            val radius = (6f + 6f * dot.confidence.toFloat()) * pulse
+            val radius = (dot.sizePx / 2f) * pulse
             drawCircle(
                 color = Color(0xFFEF4444),
                 radius = radius,
                 center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
-                alpha = 0.85f,
+                alpha = dot.alpha,
             )
             drawCircle(
                 color = Color(0xFFEF4444),
                 radius = radius * 2f,
                 center = androidx.compose.ui.geometry.Offset(dot.screenX, dot.screenY),
-                alpha = 0.35f,
+                alpha = dot.alpha * 0.5f,
                 style = Stroke(width = 2f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DebugHud(debug: DebugSnapshot, scanGranted: Boolean, cameraGranted: Boolean) {
+    val yawDeg = Math.toDegrees(debug.yawRad)
+    Column(
+        modifier = Modifier
+            .padding(top = 28.dp, start = 16.dp)
+            .background(Color(0x55000000), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "Yaw ${"%.0f".format(yawDeg)}°",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+        )
+        Text(
+            text = "BLE ${if (scanGranted) "yes" else "no"} • CAM ${if (cameraGranted) "yes" else "no"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFE0E0E0),
+        )
+        Text(
+            text = "Tracks ${debug.totalTracks}  Dots ${debug.trackableCount}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFE0E0E0),
+        )
+        Text(
+            text = "Scans ${debug.scanCount}  Age ${scanAgeLabel(debug.lastScanMs)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFB8B8B8),
+        )
+        debug.topDevices.forEach { device ->
+            Text(
+                text = "${device.keyPrefix} rssi=${"%.1f".format(device.rssiEma)} " +
+                    "p=${"%.2f".format(device.phoneScore)} c=${"%.2f".format(device.confidence)} " +
+                    "a=${"%.2f".format(device.azimuthConfidence)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFFB0B0B0),
             )
         }
     }
@@ -294,7 +344,7 @@ private fun InfoButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InfoSheet(
-    tracker: DeviceTracker,
+    tracker: CompassTracker,
     sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
 ) {
@@ -313,7 +363,7 @@ private fun InfoSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "We found ${summary.totalDevices} devices around you.",
+                text = "We found ${debug.totalTracks} devices around you.",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White,
             )
@@ -336,6 +386,7 @@ private fun InfoSheet(
                     text = "${device.keyPrefix}  rssi=${"%.1f".format(device.rssiEma)}  " +
                         "phone=${"%.2f".format(device.phoneScore)}  " +
                         "conf=${"%.2f".format(device.confidence)}  " +
+                        "azi=${"%.2f".format(device.azimuthConfidence)}  " +
                         "dt=${device.lastSeenDeltaMs}ms",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF888888),
@@ -367,4 +418,19 @@ private fun requiredPermissions(enableWifiScan: Boolean): List<String> {
         }
     }
     return permissions.distinct()
+}
+
+private fun hasBleScanPermission(results: Map<String, Boolean>): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        results[Manifest.permission.BLUETOOTH_SCAN] == true
+    } else {
+        results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+    }
+}
+
+private fun scanAgeLabel(lastScanMs: Long): String {
+    if (lastScanMs == 0L) return "--"
+    val ageMs = System.currentTimeMillis() - lastScanMs
+    return "${(ageMs / 1000).coerceAtLeast(0)}s"
 }

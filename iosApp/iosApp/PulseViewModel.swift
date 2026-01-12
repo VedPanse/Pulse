@@ -12,14 +12,20 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published var summary: TrackerSummary?
     @Published var debug: DebugSnapshot?
 
-    private let tracker = DeviceTracker()
+    private let tracker = CompassTracker()
     private let trackerQueue = DispatchQueue(label: "pulse.tracker")
     private var central: CBCentralManager?
     private var timer: Timer?
+    private let yawSource = IosYawSource()
 
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: DispatchQueue(label: "pulse.ble"))
+        yawSource.start { [tracker, trackerQueue] sample in
+            trackerQueue.async {
+                tracker.onYaw(sample: sample)
+            }
+        }
         startTimer()
     }
 
@@ -53,14 +59,12 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
         let txPowerValue = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
         let txPower = txPowerValue == nil ? nil : Int32(txPowerValue ?? 0)
         let event = BleScanEvent(
-            platform: "ios",
+            key: deviceKey,
             timestampMs: now,
             rssi: Int32(RSSI.intValue),
             txPower: kotlinInt(txPower),
             manufacturerId: kotlinInt(manufacturerId),
-            serviceUuids: serviceUuids,
-            rawAdvHash: nil,
-            deviceKey: deviceKey
+            serviceUuids: serviceUuids
         )
         trackerQueue.async { [tracker] in
             tracker.onScan(event: event)
@@ -97,5 +101,6 @@ final class PulseViewModel: NSObject, ObservableObject, CBCentralManagerDelegate
     deinit {
         timer?.invalidate()
         central?.stopScan()
+        yawSource.stop()
     }
 }

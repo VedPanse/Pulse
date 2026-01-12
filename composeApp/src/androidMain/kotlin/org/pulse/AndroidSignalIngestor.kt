@@ -1,11 +1,11 @@
 package org.pulse
 
 import android.content.Context
-import org.pulse.tracking.DeviceTracker
+import org.pulse.core.CompassTracker
 
 class AndroidSignalIngestor(
     context: Context,
-    tracker: DeviceTracker,
+    tracker: CompassTracker,
     enableWifiScan: Boolean,
 ) {
     private val bleScanner = AndroidBleScanner(tracker)
