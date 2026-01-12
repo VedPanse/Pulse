@@ -8,6 +8,7 @@
 ![Privacy](https://img.shields.io/badge/Privacy-No%20Data%20Collected-blue)
 
 ---
+![Pulse banner](assets/banner.png)
 
 ## Goal
 
@@ -160,4 +161,4 @@ Pulse/
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [Apache License](LICENSE).
